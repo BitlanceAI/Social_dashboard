@@ -72,6 +72,41 @@ const PrivacyPolicy = () => {
                     <section>
                         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                             <span className="w-1.5 h-8 bg-blue-600 rounded-full mr-2"></span>
+                            Facebook and Instagram Data
+                        </h2>
+                        <p className="mb-4">
+                            When you connect a Meta account, we use Facebook Login and the official
+                            Meta Graph API. We never ask for or store your Facebook or Instagram password.
+                        </p>
+                        <p className="mb-2 font-semibold">What we access, and why:</p>
+                        <ul className="list-disc pl-6 space-y-2 marker:text-blue-500 mb-4">
+                            <li><strong>Your Facebook Pages</strong> (name, category, Page access token) &mdash; so you can choose which Page to publish to.</li>
+                            <li><strong>Linked Instagram Business account</strong> (account ID, username, profile picture, follower count, and your existing media) &mdash; so you can select it as a publishing target and see what has already been posted.</li>
+                            <li><strong>Publishing access</strong> &mdash; to create the posts you compose and schedule in this application. We publish only content you supply, at the time you choose.</li>
+                        </ul>
+                        <p className="mb-2 font-semibold">What we do not do:</p>
+                        <ul className="list-disc pl-6 space-y-2 marker:text-blue-500 mb-4">
+                            <li>We do not read or store your Facebook or Instagram direct messages.</li>
+                            <li>We do not sell, rent, or share Meta platform data with third parties.</li>
+                            <li>We do not use Meta platform data to build advertising profiles or train models.</li>
+                        </ul>
+                        <p className="mb-4">
+                            Access tokens are encrypted at rest and are used only to make requests you
+                            initiate. You can disconnect at any time from the Meta dashboard inside this
+                            application, or by removing the app in your Facebook settings &mdash; either
+                            action deletes the stored token and connection immediately.
+                        </p>
+                        <p>
+                            To request deletion of all data associated with your Meta account, remove the
+                            app from your Facebook Settings &rarr; Apps and Websites, or email{' '}
+                            <a href="mailto:support@bitlancetechhub.com" className="text-blue-600 hover:underline">support@bitlancetechhub.com</a>.
+                            We honour Meta&apos;s deauthorization and data deletion callbacks automatically.
+                        </p>
+                    </section>
+
+                    <section>
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                            <span className="w-1.5 h-8 bg-blue-600 rounded-full mr-2"></span>
                             Data Storage and Retention
                         </h2>
                         <ul className="list-disc pl-6 space-y-2 marker:text-blue-500">

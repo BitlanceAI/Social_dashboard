@@ -11,24 +11,13 @@
         "build": "echo 'No build necessary for backend'"
     },
     "dependencies": {
-        "@google/generative-ai": "^0.24.1",
-        "@onesignal/node-onesignal": "^5.3.1-beta1",
         "@supabase/supabase-js": "^2.39.0",
         "axios": "^1.13.3",
-        "bcrypt": "^6.0.0",
         "cors": "^2.8.5",
         "dotenv": "^17.2.3",
         "express": "^4.21.2",
-        "firebase-admin": "^13.6.1",
-        "form-data": "^4.0.5",
-        "googleapis": "^170.1.0",
         "multer": "^2.0.2",
-        "node-cron": "^4.2.1",
-        "nodemailer": "^8.0.1",
-        "nodemon": "^3.1.14",
-        "openai": "^6.16.0",
-        "twilio": "^5.12.2",
-        "xlsx": "^0.18.5"
+        "nodemon": "^3.1.14"
     },
     "engines": {
         "node": ">=18"

@@ -487,22 +487,16 @@ class MetaService {
      * Meta permissions the platform is reviewed for.
      */
     static get DEFAULT_SCOPES() {
+        // Only permissions this app can actually demonstrate in App Review.
+        // Requesting anything we cannot screencast gets that permission
+        // rejected, so messaging/comments scopes are deliberately absent
+        // until those features exist.
         return [
-            'pages_show_list',
-            'pages_manage_posts',
-            'pages_read_engagement',
-            'pages_manage_engagement',
-            'pages_messaging',
-            'instagram_basic',
-            'instagram_content_publish',
-            'instagram_manage_comments',
-            'instagram_manage_insights',
-            'business_management',
-            'ads_management',
-            'ads_read',
-            'read_insights',
-            'whatsapp_business_management',
-            'whatsapp_business_messaging'
+            'pages_show_list',          // list Pages -> find linked IG account
+            'pages_read_engagement',    // read Page fields
+            'pages_manage_posts',       // publish to a Facebook Page
+            'instagram_basic',          // read IG profile + media
+            'instagram_content_publish' // publish to IG Business account
         ];
     }
 

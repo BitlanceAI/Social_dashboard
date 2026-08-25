@@ -26,15 +26,6 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
-    optimizeDeps: {
-      include: [
-        '@fullcalendar/core',
-        '@fullcalendar/react',
-        '@fullcalendar/daygrid',
-        '@fullcalendar/timegrid',
-        '@fullcalendar/interaction',
-      ],
-    },
     build: {
       chunkSizeWarningLimit: 600,
       // Enable minification (esbuild is the default — fast & effective)
@@ -50,34 +41,11 @@ export default defineConfig(({ mode }) => {
             if (id.includes('node_modules/react-router-dom/') || id.includes('node_modules/@remix-run/')) {
               return 'router';
             }
-            // Heavy dashboard-only libraries
-            if (id.includes('node_modules/recharts/') || id.includes('node_modules/d3-')) {
-              return 'charts';
-            }
-            if (id.includes('node_modules/@fullcalendar/')) {
-              return 'calendar';
-            }
             if (id.includes('node_modules/framer-motion/')) {
               return 'motion';
             }
-            // 3D runtime — huge, only on landing/spline pages
-            if (id.includes('@splinetool/')) {
-              return 'spline';
-            }
-            // Office/export utilities — only in admin flows
-            if (id.includes('node_modules/jspdf/') || id.includes('node_modules/xlsx/')) {
-              return 'office-export';
-            }
-            // Auth SDKs — loaded on first auth-gated route
-            if (id.includes('node_modules/firebase/')) {
-              return 'firebase';
-            }
             if (id.includes('node_modules/@supabase/')) {
               return 'supabase';
-            }
-            // Voice AI SDK — only on voice agent page
-            if (id.includes('node_modules/retell-client-js-sdk/')) {
-              return 'retell';
             }
             // UI utilities — small, share across most routes
             if (id.includes('node_modules/lucide-react/')) {

@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://seo.bitlancetechhub.com/sitemap.xml

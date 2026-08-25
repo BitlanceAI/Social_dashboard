@@ -120,6 +120,7 @@ const MetaAdsPage = () => {
     const [loadingGraphics, setLoadingGraphics] = useState(false);
     const [scheduleFormData, setScheduleFormData] = useState({
         pageId: '',
+        platforms: ['facebook'],
         content: '',
         mediaUrls: [], // Array for multiple URLs (or Preview blobs)
         mediaFiles: [], // Array of File objects
@@ -578,6 +579,7 @@ const MetaAdsPage = () => {
                 setScheduleStep(1);
                 setScheduleFormData({
                     pageId: '',
+                    platforms: ['facebook'],
                     content: '',
                     mediaUrls: [],
                     mediaFiles: [],
@@ -645,6 +647,11 @@ const MetaAdsPage = () => {
             case 2:
                 if (!scheduleFormData.content && scheduleFormData.mediaUrls.length === 0 && scheduleFormData.mediaFiles.length === 0) {
                     return 'Please add content or media';
+                }
+                // Instagram's API cannot publish text-only posts
+                if (scheduleFormData.platforms.includes('instagram')
+                    && scheduleFormData.mediaUrls.length === 0 && scheduleFormData.mediaFiles.length === 0) {
+                    return 'Instagram posts require at least one image or video';
                 }
                 return true;
             case 3:
@@ -1307,7 +1314,16 @@ const MetaAdsPage = () => {
                     <StepAccount
                         pages={connection?.pages || []}
                         selectedPageId={scheduleFormData.pageId}
-                        onSelect={(pageId) => updateScheduleForm({ pageId })}
+                        platforms={scheduleFormData.platforms}
+                        onSelect={(pageId) => {
+                            const page = (connection?.pages || []).find(p => String(p.id) === String(pageId));
+                            // Drop Instagram if the newly picked page has no linked IG account
+                            const platforms = page?.instagram_business_account
+                                ? scheduleFormData.platforms
+                                : scheduleFormData.platforms.filter(pl => pl !== 'instagram');
+                            updateScheduleForm({ pageId, platforms: platforms.length ? platforms : ['facebook'] });
+                        }}
+                        onPlatformsChange={(platforms) => updateScheduleForm({ platforms })}
                     />
                 )}
 

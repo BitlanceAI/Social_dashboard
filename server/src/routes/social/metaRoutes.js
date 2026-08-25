@@ -6,6 +6,7 @@
  * Meta Graph API.
  */
 
+import crypto from 'crypto';
 import express from 'express';
 import multer from 'multer';
 import { createClient } from '@supabase/supabase-js';
@@ -41,10 +42,68 @@ const returnUrl = (query) => `${FRONTEND_URL}${META_RETURN_PATH}?${query}`;
 
 // Apply auth middleware to all routes except the OAuth redirect callback,
 // which Meta calls directly in the browser without a Bearer token.
+// Meta calls these directly (browser redirect or server-to-server signed
+// request), so they carry no Bearer token of ours.
+const PUBLIC_PATHS = ['/oauth/callback', '/deauthorize', '/data-deletion'];
+
 router.use((req, res, next) => {
-    if (req.path === '/oauth/callback') return next();
+    if (PUBLIC_PATHS.includes(req.path)) return next();
     return authenticateUser(req, res, next);
 });
+
+/**
+ * Verify and decode a Meta signed_request (base64url payload.signature,
+ * HMAC-SHA256 keyed with the app secret). Returns null if it does not verify.
+ */
+const parseSignedRequest = (signedRequest) => {
+    if (!signedRequest || !META_APP_SECRET) return null;
+
+    const [encodedSig, payload] = String(signedRequest).split('.');
+    if (!encodedSig || !payload) return null;
+
+    const expected = crypto
+        .createHmac('sha256', META_APP_SECRET)
+        .update(payload)
+        .digest();
+
+    let provided;
+    try {
+        provided = Buffer.from(encodedSig, 'base64url');
+    } catch {
+        return null;
+    }
+
+    if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    } catch {
+        return null;
+    }
+};
+
+/**
+ * Delete everything we hold for a Meta user id. Meta identifies the person by
+ * their app-scoped id, which is what we stored as the connection's meta_user_id.
+ */
+const purgeMetaUser = async (metaUserId) => {
+    const { data: connections } = await supabase
+        .from('meta_connections')
+        .select('id, user_id')
+        .eq('meta_user_id', metaUserId);
+
+    if (!connections || connections.length === 0) return 0;
+
+    const userIds = connections.map((c) => c.user_id);
+
+    // Scheduled posts reference the connection; clear them first
+    await supabase.from('scheduled_posts').delete().in('user_id', userIds);
+    await supabase.from('meta_connections').delete().eq('meta_user_id', metaUserId);
+
+    return connections.length;
+};
 
 /**
  * Load the caller's active Meta connection and decrypt its access token.
@@ -198,6 +257,9 @@ router.post('/connect-api-key', async (req, res) => {
             .upsert({
                 user_id: userId,
                 connection_type: 'api_key',
+                // App-scoped Meta user id — how Meta identifies the person in
+                // deauthorize / data-deletion callbacks
+                meta_user_id: profile.data.id,
                 access_token: encryptedToken,
                 app_id: appId || null,
                 app_secret: encryptedAppSecret,
@@ -820,6 +882,70 @@ router.get('/account-balance', async (req, res) => {
 
     } catch (error) {
         console.error('Get account balance error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==================== META PLATFORM CALLBACKS ====================
+
+/**
+ * Deauthorize Callback
+ * POST /api/meta/deauthorize
+ *
+ * Meta calls this when a person removes the app from their Facebook settings.
+ * Configure the URL in App Dashboard -> Facebook Login -> Settings.
+ */
+router.post('/deauthorize', async (req, res) => {
+    try {
+        const decoded = parseSignedRequest(req.body?.signed_request);
+
+        if (!decoded?.user_id) {
+            return res.status(400).json({ error: 'Invalid signed_request' });
+        }
+
+        const removed = await purgeMetaUser(decoded.user_id);
+        console.log(`[Meta] Deauthorize for ${decoded.user_id} — removed ${removed} connection(s)`);
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Deauthorize callback error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * Data Deletion Request Callback
+ * POST /api/meta/data-deletion
+ *
+ * Meta calls this when a person requests deletion of their data. It must
+ * respond with a status URL and a confirmation code so the person can check
+ * on the request. Configure in App Dashboard -> Settings -> Basic.
+ */
+router.post('/data-deletion', async (req, res) => {
+    try {
+        const decoded = parseSignedRequest(req.body?.signed_request);
+
+        if (!decoded?.user_id) {
+            return res.status(400).json({ error: 'Invalid signed_request' });
+        }
+
+        const removed = await purgeMetaUser(decoded.user_id);
+
+        // Deterministic per-user code so a repeat request returns the same one
+        const confirmationCode = crypto
+            .createHash('sha256')
+            .update(`${decoded.user_id}:${META_APP_SECRET}`)
+            .digest('hex')
+            .slice(0, 16);
+
+        console.log(`[Meta] Data deletion for ${decoded.user_id} — removed ${removed} connection(s), code ${confirmationCode}`);
+
+        res.json({
+            url: returnUrl(`data_deletion=${confirmationCode}`),
+            confirmation_code: confirmationCode
+        });
+    } catch (error) {
+        console.error('Data deletion callback error:', error);
         res.status(500).json({ error: error.message });
     }
 });
