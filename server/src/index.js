@@ -66,6 +66,7 @@ import adminRoutes from './routes/admin/adminRoutes.js';
 import profileRoutes from './routes/auth/profileRoutes.js';
 import authRoutes from './routes/auth/authRoutes.js';
 import linkedinRoutes from './routes/social/linkedinRoutes.js';
+import metaRoutes from './routes/social/metaRoutes.js';
 import articleRoutes from './routes/blog/articleRoutes.js';
 import geminiRoutes from './routes/seo/gemini.js';
 
@@ -85,6 +86,7 @@ app.use('/api/track', trackingRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/profiles', profileRoutes);
 app.use('/api/linkedin', linkedinRoutes);
+app.use('/api/meta', metaRoutes); // Facebook Pages + Instagram publishing + Meta Ads
 
 import twitterRoutes from './routes/social/twitterRoutes.js';
 app.use('/api/twitter', twitterRoutes);

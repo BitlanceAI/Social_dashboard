@@ -1,0 +1,563 @@
+/**
+ * Meta Graph API Service
+ *
+ * Official Meta Graph API + Marketing API client. Covers Facebook Page
+ * publishing, Instagram Content Publishing, ad campaigns/insights and the
+ * Conversions API. Every request goes to graph.facebook.com — there is no
+ * third-party relay in this path.
+ */
+
+import axios from 'axios';
+
+const META_API_VERSION = process.env.META_API_VERSION || 'v21.0';
+const META_GRAPH_URL = `https://graph.facebook.com/${META_API_VERSION}`;
+
+// Instagram video containers are processed asynchronously — poll until FINISHED.
+const IG_STATUS_POLL_INTERVAL_MS = 3000;
+const IG_STATUS_MAX_ATTEMPTS = 40; // ~2 minutes
+
+const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.m4v', '.avi', '.webm'];
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Best-effort media type detection from a public URL.
+ */
+const isVideoUrl = (url = '') => {
+    const path = String(url).split('?')[0].toLowerCase();
+    return VIDEO_EXTENSIONS.some((ext) => path.endsWith(ext));
+};
+
+class MetaService {
+    constructor(accessToken) {
+        this.accessToken = accessToken;
+        this.client = axios.create({
+            baseURL: META_GRAPH_URL,
+            timeout: 60000,
+        });
+    }
+
+    /**
+     * Make authenticated API request
+     */
+    async request(method, endpoint, data = {}, params = {}) {
+        try {
+            const config = {
+                method,
+                url: endpoint,
+                params: {
+                    access_token: this.accessToken,
+                    ...params
+                }
+            };
+
+            if (method === 'POST' || method === 'PUT') {
+                config.data = data;
+            }
+
+            const response = await this.client.request(config);
+            return { success: true, data: response.data };
+        } catch (error) {
+            console.error(`Meta API Error [${endpoint}]:`, error.response?.data || error.message);
+            return {
+                success: false,
+                error: error.response?.data?.error?.message || error.message,
+                code: error.response?.data?.error?.code
+            };
+        }
+    }
+
+    // ==================== ACCOUNT METHODS ====================
+
+    /**
+     * Get current user profile
+     */
+    async getMe() {
+        return this.request('GET', '/me', {}, {
+            fields: 'id,name,email,picture'
+        });
+    }
+
+    /**
+     * Get user's Facebook Pages, including any linked Instagram Business account.
+     */
+    async getPages() {
+        const result = await this.request('GET', '/me/accounts', {}, {
+            fields: 'id,name,access_token,category,picture,fan_count,instagram_business_account{id,username,profile_picture_url,followers_count}'
+        });
+
+        if (result.success && result.data.data) {
+            return { success: true, pages: result.data.data };
+        }
+        return result;
+    }
+
+    /**
+     * Get user's Ad Accounts
+     */
+    async getAdAccounts() {
+        const result = await this.request('GET', '/me/adaccounts', {}, {
+            fields: 'id,account_id,name,account_status,currency,amount_spent,balance'
+        });
+
+        if (result.success && result.data.data) {
+            return { success: true, adAccounts: result.data.data };
+        }
+        return result;
+    }
+
+    /**
+     * Validate access token
+     */
+    async validateToken() {
+        const result = await this.request('GET', '/debug_token', {}, {
+            input_token: this.accessToken
+        });
+
+        if (result.success && result.data.data) {
+            return {
+                success: true,
+                isValid: result.data.data.is_valid,
+                expiresAt: result.data.data.expires_at ? new Date(result.data.data.expires_at * 1000) : null,
+                scopes: result.data.data.scopes || []
+            };
+        }
+        return { success: false, isValid: false };
+    }
+
+    /**
+     * Resolve the Page access token for a given page id using the current
+     * (user) token. Publishing as a Page requires the Page token, not the
+     * user token.
+     */
+    async getPageToken(pageId) {
+        const pagesResult = await this.getPages();
+        if (!pagesResult.success) {
+            return { success: false, error: pagesResult.error || 'Failed to list pages', code: pagesResult.code };
+        }
+
+        const page = (pagesResult.pages || []).find((p) => String(p.id) === String(pageId));
+        if (!page) {
+            return { success: false, error: `Page ${pageId} is not available on this Meta connection` };
+        }
+        if (!page.access_token) {
+            return { success: false, error: `No page access token returned for ${page.name || pageId}. Re-grant pages_manage_posts.` };
+        }
+
+        return { success: true, page, pageAccessToken: page.access_token };
+    }
+
+    // ==================== FACEBOOK PAGE POST METHODS ====================
+
+    /**
+     * Publish a post to a Facebook Page.
+     * Supports text, link, single photo/video and multi-photo (carousel) posts.
+     */
+    async publishPost(pageId, pageAccessToken, { message, link, mediaUrls }) {
+        const service = new MetaService(pageAccessToken);
+        const media = (mediaUrls || []).filter(Boolean);
+
+        // Single video → /videos
+        if (media.length === 1 && isVideoUrl(media[0])) {
+            return service.request('POST', `/${pageId}/videos`, {
+                description: message,
+                file_url: media[0]
+            });
+        }
+
+        // Single image → /photos publishes directly with a caption
+        if (media.length === 1) {
+            return service.request('POST', `/${pageId}/photos`, {
+                caption: message,
+                url: media[0]
+            });
+        }
+
+        // Multiple images → upload each unpublished, then attach to one feed post
+        if (media.length > 1) {
+            const attached = [];
+            for (const url of media) {
+                const uploaded = await service.request('POST', `/${pageId}/photos`, {
+                    url,
+                    published: false
+                });
+                if (!uploaded.success) {
+                    return uploaded;
+                }
+                attached.push({ media_fbid: uploaded.data.id });
+            }
+
+            const postData = { message, attached_media: attached };
+            if (link) postData.link = link;
+            return service.request('POST', `/${pageId}/feed`, postData);
+        }
+
+        // Text / link only
+        const postData = { message };
+        if (link) postData.link = link;
+        return service.request('POST', `/${pageId}/feed`, postData);
+    }
+
+    /**
+     * Schedule a post natively on a Facebook Page.
+     * Meta requires the time to be 10 minutes – 75 days in the future.
+     */
+    async schedulePost(pageId, pageAccessToken, { message, link, scheduledTime }) {
+        const service = new MetaService(pageAccessToken);
+
+        const postData = {
+            message,
+            published: false,
+            scheduled_publish_time: Math.floor(new Date(scheduledTime).getTime() / 1000)
+        };
+        if (link) postData.link = link;
+
+        return service.request('POST', `/${pageId}/feed`, postData);
+    }
+
+    /**
+     * Get natively-scheduled posts for a page
+     */
+    async getScheduledPosts(pageId, pageAccessToken) {
+        const service = new MetaService(pageAccessToken);
+        return service.request('GET', `/${pageId}/scheduled_posts`, {}, {
+            fields: 'id,message,scheduled_publish_time,created_time'
+        });
+    }
+
+    // ==================== INSTAGRAM PUBLISHING METHODS ====================
+
+    /**
+     * Get the Instagram Business account linked to a Page.
+     */
+    async getInstagramAccount(pageId, pageAccessToken) {
+        const service = new MetaService(pageAccessToken || this.accessToken);
+        const result = await service.request('GET', `/${pageId}`, {}, {
+            fields: 'instagram_business_account{id,username,profile_picture_url,followers_count}'
+        });
+
+        if (!result.success) return result;
+
+        const igAccount = result.data?.instagram_business_account;
+        if (!igAccount?.id) {
+            return {
+                success: false,
+                error: 'No Instagram Business account is linked to this Facebook Page. Link one in Meta Business Suite.'
+            };
+        }
+
+        return { success: true, instagramAccount: igAccount };
+    }
+
+    /**
+     * Poll an Instagram media container until it finishes processing.
+     * Images are usually immediate; videos/reels take several seconds.
+     */
+    async waitForContainer(containerId) {
+        for (let attempt = 0; attempt < IG_STATUS_MAX_ATTEMPTS; attempt++) {
+            const status = await this.request('GET', `/${containerId}`, {}, {
+                fields: 'status_code,status'
+            });
+
+            if (!status.success) return status;
+
+            const code = status.data?.status_code;
+            if (code === 'FINISHED') return { success: true, data: status.data };
+            if (code === 'ERROR' || code === 'EXPIRED') {
+                return {
+                    success: false,
+                    error: `Instagram media processing ${code}: ${status.data?.status || 'no detail'}`
+                };
+            }
+
+            await sleep(IG_STATUS_POLL_INTERVAL_MS);
+        }
+
+        return { success: false, error: 'Timed out waiting for Instagram media to finish processing' };
+    }
+
+    /**
+     * Create a single Instagram media container.
+     */
+    async createInstagramContainer(igUserId, { url, caption, isCarouselItem = false }) {
+        const payload = {};
+
+        if (isVideoUrl(url)) {
+            payload.media_type = 'REELS';
+            payload.video_url = url;
+        } else {
+            payload.image_url = url;
+        }
+
+        if (isCarouselItem) {
+            payload.is_carousel_item = true;
+        } else if (caption) {
+            payload.caption = caption;
+        }
+
+        return this.request('POST', `/${igUserId}/media`, payload);
+    }
+
+    /**
+     * Publish to an Instagram Business account using the official
+     * Content Publishing API: create container(s) → publish.
+     *
+     * Instagram requires at least one image or video — text-only posts are
+     * not supported by the API.
+     */
+    async publishInstagramPost(igUserId, pageAccessToken, { caption, mediaUrls }) {
+        const service = new MetaService(pageAccessToken);
+        const media = (mediaUrls || []).filter(Boolean);
+
+        if (media.length === 0) {
+            return {
+                success: false,
+                error: 'Instagram posts require at least one image or video. Text-only posts are not supported by the Instagram API.'
+            };
+        }
+
+        if (media.length > 10) {
+            return { success: false, error: 'Instagram carousels support a maximum of 10 items.' };
+        }
+
+        let creationId;
+
+        if (media.length === 1) {
+            const container = await service.createInstagramContainer(igUserId, { url: media[0], caption });
+            if (!container.success) return container;
+            creationId = container.data.id;
+        } else {
+            // Carousel: each child first, then the parent container
+            const childIds = [];
+            for (const url of media) {
+                const child = await service.createInstagramContainer(igUserId, { url, isCarouselItem: true });
+                if (!child.success) return child;
+
+                if (isVideoUrl(url)) {
+                    const ready = await service.waitForContainer(child.data.id);
+                    if (!ready.success) return ready;
+                }
+                childIds.push(child.data.id);
+            }
+
+            const parent = await service.request('POST', `/${igUserId}/media`, {
+                media_type: 'CAROUSEL',
+                children: childIds.join(','),
+                ...(caption ? { caption } : {})
+            });
+            if (!parent.success) return parent;
+            creationId = parent.data.id;
+        }
+
+        // Wait for processing (returns immediately for already-finished images)
+        const ready = await service.waitForContainer(creationId);
+        if (!ready.success) return ready;
+
+        return service.request('POST', `/${igUserId}/media_publish`, { creation_id: creationId });
+    }
+
+    /**
+     * Recent Instagram media for an account.
+     */
+    async getInstagramMedia(igUserId, pageAccessToken, limit = 25) {
+        const service = new MetaService(pageAccessToken || this.accessToken);
+        return service.request('GET', `/${igUserId}/media`, {}, {
+            fields: 'id,caption,media_type,media_url,permalink,thumbnail_url,timestamp,like_count,comments_count',
+            limit
+        });
+    }
+
+    /**
+     * Remaining Instagram publishing quota (25 posts / 24h per account).
+     */
+    async getInstagramPublishingLimit(igUserId, pageAccessToken) {
+        const service = new MetaService(pageAccessToken || this.accessToken);
+        return service.request('GET', `/${igUserId}/content_publishing_limit`, {}, {
+            fields: 'config,quota_usage'
+        });
+    }
+
+    // ==================== CAMPAIGN METHODS ====================
+
+    /**
+     * Get campaigns for an ad account
+     */
+    async getCampaigns(adAccountId) {
+        return this.request('GET', `/act_${adAccountId}/campaigns`, {}, {
+            fields: 'id,name,status,objective,created_time,updated_time,daily_budget,lifetime_budget,budget_remaining',
+            limit: 50
+        });
+    }
+
+    /**
+     * Get campaign insights
+     */
+    async getCampaignInsights(campaignId, datePreset = 'last_30d') {
+        return this.request('GET', `/${campaignId}/insights`, {}, {
+            fields: 'impressions,clicks,spend,reach,cpc,ctr,conversions,cost_per_conversion',
+            date_preset: datePreset
+        });
+    }
+
+    /**
+     * Get ad account insights (aggregated)
+     */
+    async getAdAccountInsights(adAccountId, datePreset = 'last_30d') {
+        return this.request('GET', `/act_${adAccountId}/insights`, {}, {
+            fields: 'impressions,clicks,spend,reach,cpc,ctr,conversions,cost_per_conversion',
+            date_preset: datePreset
+        });
+    }
+
+    /**
+     * Create a campaign
+     */
+    async createCampaign(adAccountId, { name, objective, status = 'ACTIVE', dailyBudget }) {
+        const campaignData = {
+            name,
+            objective, // OUTCOME_TRAFFIC, OUTCOME_ENGAGEMENT, OUTCOME_LEADS, etc.
+            status,
+            special_ad_categories: [], // Required field
+        };
+
+        if (dailyBudget) {
+            campaignData.daily_budget = dailyBudget;
+            campaignData.bid_strategy = 'LOWEST_COST_WITHOUT_CAP';
+        }
+
+        return this.request('POST', `/act_${adAccountId}/campaigns`, campaignData);
+    }
+
+    async updateCampaignStatus(campaignId, status) {
+        return this.request('POST', `/${campaignId}`, { status });
+    }
+
+    // ==================== CONVERSION API METHODS ====================
+
+    /**
+     * Send Event to Meta Conversion API
+     * @param {string} pixelId - The Meta Pixel ID
+     * @param {Array} events - Array of event objects
+     * @param {string|null} testCode - Optional test code for Graph API Test Tool
+     */
+    async sendConversionEvent(pixelId, events, testCode = null) {
+        const payload = { data: events };
+
+        if (testCode) {
+            payload.test_event_code = testCode;
+        }
+
+        console.log(`Sending ${events.length} events to CAPI (Pixel: ${pixelId})`);
+
+        return this.request('POST', `/${pixelId}/events`, payload);
+    }
+
+    // ==================== UTILITY METHODS ====================
+
+    /**
+     * Exchange short-lived token for long-lived token
+     */
+    static async exchangeToken(shortLivedToken, appId, appSecret) {
+        try {
+            const response = await axios.get(`${META_GRAPH_URL}/oauth/access_token`, {
+                params: {
+                    grant_type: 'fb_exchange_token',
+                    client_id: appId,
+                    client_secret: appSecret,
+                    fb_exchange_token: shortLivedToken
+                }
+            });
+
+            return {
+                success: true,
+                accessToken: response.data.access_token,
+                expiresIn: response.data.expires_in
+            };
+        } catch (error) {
+            console.error('Token exchange error:', error.response?.data || error.message);
+            return {
+                success: false,
+                error: error.response?.data?.error?.message || error.message
+            };
+        }
+    }
+
+    /**
+     * Default permission set requested at OAuth time. These are the official
+     * Meta permissions the platform is reviewed for.
+     */
+    static get DEFAULT_SCOPES() {
+        return [
+            'pages_show_list',
+            'pages_manage_posts',
+            'pages_read_engagement',
+            'pages_manage_engagement',
+            'pages_messaging',
+            'instagram_basic',
+            'instagram_content_publish',
+            'instagram_manage_comments',
+            'instagram_manage_insights',
+            'business_management',
+            'ads_management',
+            'ads_read',
+            'read_insights',
+            'whatsapp_business_management',
+            'whatsapp_business_messaging'
+        ];
+    }
+
+    /**
+     * Generate OAuth authorization URL
+     */
+    static getOAuthUrl(appId, redirectUri, scope, state) {
+        const scopes = scope || MetaService.DEFAULT_SCOPES;
+
+        const params = new URLSearchParams({
+            client_id: appId,
+            redirect_uri: redirectUri,
+            scope: scopes.join(','),
+            response_type: 'code',
+            state: state || generateState()
+        });
+
+        return `https://www.facebook.com/${META_API_VERSION}/dialog/oauth?${params.toString()}`;
+    }
+
+    /**
+     * Exchange OAuth code for access token
+     */
+    static async exchangeCodeForToken(code, appId, appSecret, redirectUri) {
+        try {
+            const response = await axios.get(`${META_GRAPH_URL}/oauth/access_token`, {
+                params: {
+                    client_id: appId,
+                    client_secret: appSecret,
+                    redirect_uri: redirectUri,
+                    code
+                }
+            });
+
+            return {
+                success: true,
+                accessToken: response.data.access_token,
+                expiresIn: response.data.expires_in
+            };
+        } catch (error) {
+            console.error('OAuth code exchange error:', error.response?.data || error.message);
+            return {
+                success: false,
+                error: error.response?.data?.error?.message || error.message
+            };
+        }
+    }
+}
+
+/**
+ * Generate random state for OAuth CSRF protection
+ */
+function generateState() {
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+}
+
+export default MetaService;
+export { MetaService, META_API_VERSION, META_GRAPH_URL, isVideoUrl };

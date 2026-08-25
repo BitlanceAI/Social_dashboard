@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import MetaService from '../social/metaService.js';
 import { decryptData } from '../../../utils/encryption.js';
 
 // Auto-post a generated article to WordPress using a saved profile
@@ -125,6 +126,7 @@ export const startPostScheduler = () => {
             console.warn('⏸  [Scheduler] Supabase unreachable (project may be paused). Skipping tick.');
             return;
         }
+        checkAndPublishPosts();
         checkAndPublishBlogPosts();
         checkAndPublishAutoBlogs();
     };
@@ -425,3 +427,158 @@ const checkAndPublishBlogPosts = async () => {
     }
 }
 
+
+// ─────────────────────────────────────────────────────────────
+// Scheduled social posts → Facebook Pages / Instagram Business
+// ─────────────────────────────────────────────────────────────
+
+const checkAndPublishPosts = async () => {
+    try {
+        const now = new Date().toISOString();
+
+        const { data: posts, error } = await supabase
+            .from('scheduled_posts')
+            .select(`
+                *,
+                meta_connections (
+                    access_token,
+                    user_id
+                )
+            `)
+            .eq('status', 'pending')
+            .lte('scheduled_time', now);
+
+        if (error) {
+            if (isHtmlError(error)) {
+                console.warn('Scheduler: Supabase connection issue (HTML error received). Project may be paused. Skipping scheduled posts fetch.');
+            } else {
+                console.error('Scheduler: Error fetching scheduled posts:', error);
+            }
+            return;
+        }
+
+        if (!posts || posts.length === 0) return;
+
+        console.log(`Scheduler: Found ${posts.length} social post(s) to publish.`);
+
+        for (const post of posts) {
+            await publishScheduledPost(post);
+        }
+
+    } catch (error) {
+        console.error('Scheduler: checkAndPublishPosts critical error:', error);
+    }
+};
+
+const publishScheduledPost = async (post) => {
+    const platforms = (post.platforms && post.platforms.length) ? post.platforms : ['facebook'];
+    console.log(`Scheduler: Publishing post ${post.id} to ${platforms.join(', ')} on page ${post.page_name}...`);
+
+    // Claim the row so a slow publish is not picked up twice by the next tick
+    const { data: claimed, error: claimError } = await supabase
+        .from('scheduled_posts')
+        .update({ status: 'processing' })
+        .eq('id', post.id)
+        .eq('status', 'pending')
+        .select('id');
+
+    if (claimError || !claimed || claimed.length === 0) {
+        return; // another tick already took it
+    }
+
+    try {
+        if (!post.meta_connections) {
+            throw new Error('Meta connection not found or deleted');
+        }
+
+        let accessToken;
+        try {
+            accessToken = decryptData(post.meta_connections.access_token);
+            if (!accessToken) throw new Error('Decrypted token is null');
+        } catch (e) {
+            throw new Error('Failed to decrypt access token');
+        }
+
+        const metaService = new MetaService(accessToken);
+
+        // Publishing as a Page requires the Page access token, not the user token
+        const tokenResult = await metaService.getPageToken(post.page_id);
+        if (!tokenResult.success) {
+            throw new Error(tokenResult.error);
+        }
+        const { pageAccessToken } = tokenResult;
+
+        const results = {};
+        const publishedIds = [];
+        const failures = [];
+
+        if (platforms.includes('facebook')) {
+            const fb = await metaService.publishPost(post.page_id, pageAccessToken, {
+                message: post.content,
+                link: post.link_url,
+                mediaUrls: post.media_urls
+            });
+
+            if (fb.success) {
+                const id = fb.data.id || fb.data.post_id;
+                results.facebook = { success: true, postId: id };
+                publishedIds.push(id);
+            } else {
+                results.facebook = { success: false, error: fb.error };
+                failures.push(`facebook: ${fb.error}`);
+            }
+        }
+
+        if (platforms.includes('instagram')) {
+            const igAccount = await metaService.getInstagramAccount(post.page_id, pageAccessToken);
+
+            if (!igAccount.success) {
+                results.instagram = { success: false, error: igAccount.error };
+                failures.push(`instagram: ${igAccount.error}`);
+            } else {
+                const ig = await metaService.publishInstagramPost(
+                    igAccount.instagramAccount.id,
+                    pageAccessToken,
+                    { caption: post.content, mediaUrls: post.media_urls }
+                );
+
+                if (ig.success) {
+                    results.instagram = { success: true, postId: ig.data.id };
+                    publishedIds.push(ig.data.id);
+                } else {
+                    results.instagram = { success: false, error: ig.error };
+                    failures.push(`instagram: ${ig.error}`);
+                }
+            }
+        }
+
+        if (publishedIds.length === 0) {
+            throw new Error(failures.join('; ') || 'Unknown Meta API error');
+        }
+
+        // Partial success still counts as published, with the failures recorded
+        console.log(`Scheduler: Post ${post.id} published. Ids: ${publishedIds.join(', ')}`);
+
+        await supabase
+            .from('scheduled_posts')
+            .update({
+                status: 'published',
+                published_at: new Date().toISOString(),
+                meta_post_id: publishedIds[0],
+                publish_results: results,
+                error_message: failures.length ? failures.join('; ') : null
+            })
+            .eq('id', post.id);
+
+    } catch (error) {
+        console.error(`Scheduler: Failed to publish post ${post.id}:`, error.message);
+
+        await supabase
+            .from('scheduled_posts')
+            .update({
+                status: 'failed',
+                error_message: error.message
+            })
+            .eq('id', post.id);
+    }
+};

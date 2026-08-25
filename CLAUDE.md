@@ -48,7 +48,7 @@ server/src/
   config/         supabaseClient.js
   controllers/    campaignController, trackingController, articleController…
   routes/         One file per domain (auth, campaigns, meta, tracking, …)
-  services/       metaService (Graph API), scheduler (node-cron), analytics
+  services/       social/metaService (Graph API), scheduler (post + blog cron), analytics
   middleware/     authMiddleware.js (Bearer token validation)
   utils/          encryption.js
 ```
@@ -58,7 +58,7 @@ server/src/
 | Service | Purpose |
 |---------|---------|
 | Supabase | PostgreSQL DB + Storage + Auth |
-| Meta Graph API v18 | Campaigns, Pages, OAuth, CAPI |
+| Meta Graph API v21 | Campaigns, Pages, Instagram publishing, OAuth, CAPI |
 | Google Sheets API | Lead data sync |
 | Retell AI | Voice agent calls |
 | Firebase | Push notifications |
@@ -109,7 +109,7 @@ Other tables: `users`, `tracking_events`, `articles`, `credit_ledger`, `meta_con
 | `/api/auth` | authRoutes.js | Login, signup, logout |
 | `/api/campaigns` | campaignRoutes.js | CRUD + `/upload` for media |
 | `/api/track` | trackingRoutes.js | CAPI relay — hashes PII |
-| `/api/meta` | metaRoutes.js | OAuth, Pages, Posts, Insights |
+| `/api/meta` | social/metaRoutes.js | OAuth, Pages, FB + Instagram publishing, scheduling, Insights |
 | `/api/credits` | creditRoutes.js | Credit balance |
 | `/api/design` | designRoutes.js | AI graphic generation |
 | `/api/admin` | adminRoutes.js | Admin ops |

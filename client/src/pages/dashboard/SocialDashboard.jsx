@@ -1497,18 +1497,23 @@ const SocialDashboard = () => {
                             </button>
                         </div>
                         <div className="p-5 space-y-3">
-                            {/* Facebook */}
+                            {/* Facebook + Instagram (official Meta OAuth) */}
                             <button
-                                onClick={() => {
-                                    if (!connectedProfiles.find(p => p.platform === 'facebook')) {
-                                        setConnectedProfiles([...connectedProfiles, {
-                                            platform: 'facebook',
-                                            name: userName + ' Page',
-                                            type: 'Facebook Page',
-                                            followers: '1.2K'
-                                        }]);
+                                onClick={async () => {
+                                    try {
+                                        const response = await fetch(`${API_BASE_URL}/api/meta/oauth/url`, {
+                                            headers: { 'Authorization': `Bearer ${authToken}` }
+                                        });
+                                        const data = await response.json();
+                                        if (data.success && data.url) {
+                                            window.location.href = data.url;
+                                        } else {
+                                            alert(data.error || 'Failed to get Meta auth URL');
+                                        }
+                                    } catch (err) {
+                                        console.error('Meta connect init error:', err);
+                                        alert('Failed to initiate Meta connection');
                                     }
-                                    setIsAddProfileModalOpen(false);
                                 }}
                                 className="w-full flex items-center gap-4 p-4 rounded-[2px] border border-slate-200 bg-white hover:border-slate-200 hover:-translate-y-1 hover:shadow-[4px_4px_0_0_#333] transition-all group cursor-pointer text-left"
                             >
@@ -1516,8 +1521,8 @@ const SocialDashboard = () => {
                                     <Facebook className="w-5 h-5 fill-current" />
                                 </div>
                                 <div className="flex-1">
-                                    <div className="text-[13px] font-mono tracking-widest text-slate-900 uppercase group-hover:text-[#26cece]">Facebook</div>
-                                    <div className="text-[10px] font-mono tracking-widest text-gray-500 uppercase mt-1">Connect page or group</div>
+                                    <div className="text-[13px] font-mono tracking-widest text-slate-900 uppercase group-hover:text-[#26cece]">Facebook &amp; Instagram</div>
+                                    <div className="text-[10px] font-mono tracking-widest text-gray-500 uppercase mt-1">Connect page + linked IG account</div>
                                 </div>
                                 <Plus className="w-5 h-5 text-gray-500 group-hover:text-slate-900" />
                             </button>
