@@ -32,9 +32,10 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
     : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5176', 'http://localhost:3000', 'https://automation-dashboard-ten.vercel.app', 'https://automation-dashboard-git-main-bitlanceais-projects.vercel.app', 'https://bitlancetechhub.com', 'https://www.bitlancetechhub.com'];
 
-// Allow all Vercel preview deployments for this project
+// Vercel preview deployments get a fresh URL per commit, so match the whole
+// team namespace rather than one project name.
 const allowedOriginPatterns = [
-    /^https:\/\/automation-dashboard-.*-bitlanceais-projects\.vercel\.app$/,
+    /^https:\/\/[a-z0-9-]+-bitlanceais-projects\.vercel\.app$/,
 ];
 
 app.use(cors({
@@ -55,10 +56,12 @@ app.use(express.json({
 import authRoutes from './routes/auth/authRoutes.js';
 import profileRoutes from './routes/auth/profileRoutes.js';
 import metaRoutes from './routes/social/metaRoutes.js';
+import pushRoutes from './routes/push/pushRoutes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/profiles', profileRoutes);
 app.use('/api/meta', metaRoutes); // Facebook Pages + Instagram publishing + Meta Ads
+app.use('/api/push', pushRoutes); // web push registration (FCM)
 
 // Health check
 app.get('/health', (req, res) => {

@@ -4,6 +4,7 @@ import AnalyticsPanel from '../../components/dashboard/AnalyticsPanel';
 import CreatePostHub from '../../components/dashboard/CreatePostHub';
 import SocialProfilesPanel from '../../components/dashboard/SocialProfilesPanel';
 import PageSelectModal from '../../components/dashboard/PageSelectModal';
+import NotificationToggle from '../../components/dashboard/NotificationToggle';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../services/supabaseClient';
@@ -614,9 +615,14 @@ const MetaAdsPage = () => {
                     return 'Instagram posts require at least one image or video';
                 }
                 return true;
-            case 3:
+            case 3: {
                 if (!scheduleFormData.scheduledTime) return 'Please select a schedule time';
+                const when = new Date(scheduleFormData.scheduledTime);
+                if (Number.isNaN(when.getTime())) return 'That date does not look valid';
+                // The picker's min only constrains the widget, not typed input
+                if (when.getTime() <= Date.now()) return 'Pick a time in the future';
                 return true;
+            }
             default:
                 return true;
         }
@@ -646,6 +652,12 @@ const MetaAdsPage = () => {
 
 
                 {/* Social Profiles tab */}
+                {activeTab === 'profiles' && isConnected && !loading && (
+                    <div className="mb-6">
+                        <NotificationToggle authHeaders={getAuthHeaders} />
+                    </div>
+                )}
+
                 {activeTab === 'profiles' && (
                     <SocialProfilesPanel
                         loading={loading}

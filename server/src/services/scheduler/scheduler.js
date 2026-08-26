@@ -8,6 +8,7 @@
 import { createClient } from '@supabase/supabase-js';
 import MetaService from '../social/metaService.js';
 import { decryptData } from '../../../utils/encryption.js';
+import { sendToUser } from '../push/fcmService.js';
 
 let supabase;
 
@@ -210,6 +211,16 @@ const publishScheduledPost = async (post) => {
             })
             .eq('id', post.id);
 
+        // Only interrupt someone for a partial failure; a clean publish is
+        // what they already expected.
+        if (failures.length) {
+            await sendToUser(post.user_id, {
+                title: 'Post published, with a problem',
+                body: `${post.page_name}: ${failures.join('; ')}`,
+                url: '/socialdashboad'
+            });
+        }
+
     } catch (error) {
         console.error(`[Scheduler] Failed to publish post ${post.id}:`, error.message);
 
@@ -220,5 +231,13 @@ const publishScheduledPost = async (post) => {
                 error_message: error.message
             })
             .eq('id', post.id);
+
+        // A post that never went out is otherwise invisible until someone
+        // opens the dashboard.
+        await sendToUser(post.user_id, {
+            title: 'Scheduled post failed',
+            body: `${post.page_name}: ${error.message}`,
+            url: '/socialdashboad'
+        });
     }
 };

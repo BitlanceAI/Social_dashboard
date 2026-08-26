@@ -75,7 +75,7 @@ const StepContent = ({
                     <label className="block text-xs text-[var(--muted)] mb-2">
                         Preview
                     </label>
-                    <div className="bg-[var(--bg)] border border-[var(--border)] shadow-xl rounded-xl flex flex-col flex-1">
+                    <div className="bg-[var(--bg)] border border-[var(--border)] shadow-xl rounded-xl flex flex-col self-start w-full overflow-hidden">
                         {/* Post Header */}
                         <div className="p-4 border-b border-[var(--border)] bg-[var(--surface)]">
                             <div className="flex items-center gap-4">
@@ -90,7 +90,7 @@ const StepContent = ({
                         </div>
 
                         {/* Content */}
-                        <div className="p-5 flex-1 bg-[var(--bg)]">
+                        <div className="p-5 bg-[var(--bg)]">
                             <p className="text-[var(--muted)] text-sm whitespace-pre-wrap leading-relaxed">
                                 {content || 'Nothing written yet'}
                             </p>

@@ -764,6 +764,14 @@ router.post('/posts/schedule', async (req, res) => {
             });
         }
 
+        const when = new Date(scheduledTime);
+        if (Number.isNaN(when.getTime())) {
+            return res.status(400).json({ error: 'scheduledTime is not a valid date' });
+        }
+        if (when.getTime() <= Date.now()) {
+            return res.status(400).json({ error: 'scheduledTime must be in the future' });
+        }
+
         const { data: connection, error: connError } = await supabase
             .from('meta_connections')
             .select('*')
