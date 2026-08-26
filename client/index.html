@@ -10,7 +10,6 @@
   <!-- DNS prefetch for non-critical third-party origins (analytics, ads) -->
   <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
   <link rel="dns-prefetch" href="https://connect.facebook.net" />
-  <link rel="dns-prefetch" href="https://cdn.onesignal.com" />
   <!-- Load only Inter (primary UI font) eagerly; specialty fonts load async -->
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap"
@@ -108,23 +107,6 @@
   </script>
   <!-- End Meta Pixel Code -->
 
-  <!-- OneSignal Push Notifications -->
-  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
-  <script>
-    window.OneSignalDeferred = window.OneSignalDeferred || [];
-    OneSignalDeferred.push(async function (OneSignal) {
-      await OneSignal.init({
-        appId: "b8119755-1466-495a-a428-2259043b9ed9",
-        safari_web_id: "web.onesignal.auto.6401d2fc-b951-4213-a02c-03159c046b78",
-        notifyButton: {
-          enable: true,
-        },
-      });
-      // Explicitly trigger the Slidedown Prompt
-      OneSignal.Slidedown.promptPush();
-    });
-  </script>
-  <!-- End OneSignal -->
 </head>
 
 <body>

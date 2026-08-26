@@ -86,33 +86,33 @@ const MediaSelector = ({
     };
 
     return (
-        <div className="font-mono">
-            <label className="block text-[10px] font-mono tracking-widest text-[#26cece] uppercase mb-4 flex items-center gap-2">
-                <span className="w-2 h-2 bg-[#26cece]"></span> Signal Assets
+        <div>
+            <label className="block text-xs text-[var(--accent)] mb-4 flex items-center gap-2">
+                <span className="w-2 h-2 bg-[var(--accent)]"></span> Media
             </label>
 
             {/* Mode Toggle */}
-            <div className="grid grid-cols-3 p-1 bg-[#111111] border border-[#333] mb-6">
+            <div className="grid grid-cols-3 p-1 bg-[var(--surface)] border border-[var(--border)] mb-6">
                 <button
                     onClick={() => setUploadMode('file')}
-                    className={`py-3 text-[10px] uppercase font-mono tracking-widest transition-all ${uploadMode === 'file'
-                            ? 'bg-[#26cece] text-[#070707] font-bold shadow-[2px_2px_0_0_#333] -translate-y-0.5 rounded-none'
-                            : 'bg-transparent text-gray-500 hover:text-white border border-transparent hover:border-[#333] rounded-none'
+                    className={`py-3 text-xs transition-all ${uploadMode === 'file'
+                            ? 'bg-[var(--accent)] text-[var(--bg)] font-bold shadow-[2px_2px_0_0_var(--border)] -translate-y-0.5 rounded-xl'
+                            : 'bg-transparent text-[var(--muted)] hover:text-[var(--text)] border border-transparent hover:border-[var(--border)] rounded-xl'
                         }`}
                 >
-                    Disk
+                    Upload
                 </button>
                 <button
                     onClick={() => {
                         setUploadMode('library');
                         loadGeneratedGraphics();
                     }}
-                    className={`py-3 text-[10px] uppercase font-mono tracking-widest transition-all ${uploadMode === 'library'
-                            ? 'bg-[#26cece] text-[#070707] font-bold shadow-[2px_2px_0_0_#333] -translate-y-0.5 rounded-none'
-                            : 'bg-transparent text-gray-500 hover:text-white border border-transparent hover:border-[#333] rounded-none'
+                    className={`py-3 text-xs transition-all ${uploadMode === 'library'
+                            ? 'bg-[var(--accent)] text-[var(--bg)] font-bold shadow-[2px_2px_0_0_var(--border)] -translate-y-0.5 rounded-xl'
+                            : 'bg-transparent text-[var(--muted)] hover:text-[var(--text)] border border-transparent hover:border-[var(--border)] rounded-xl'
                         }`}
                 >
-                    Design Array
+                    Your saved images
                 </button>
                 <button
                     onClick={() => {
@@ -121,19 +121,19 @@ const MediaSelector = ({
                             onUpdate({ mediaFiles: [], mediaUrls: [''] });
                         }
                     }}
-                    className={`py-3 text-[10px] uppercase font-mono tracking-widest transition-all ${uploadMode === 'url'
-                            ? 'bg-[#26cece] text-[#070707] font-bold shadow-[2px_2px_0_0_#333] -translate-y-0.5 rounded-none'
-                            : 'bg-transparent text-gray-500 hover:text-white border border-transparent hover:border-[#333] rounded-none'
+                    className={`py-3 text-xs transition-all ${uploadMode === 'url'
+                            ? 'bg-[var(--accent)] text-[var(--bg)] font-bold shadow-[2px_2px_0_0_var(--border)] -translate-y-0.5 rounded-xl'
+                            : 'bg-transparent text-[var(--muted)] hover:text-[var(--text)] border border-transparent hover:border-[var(--border)] rounded-xl'
                         }`}
                 >
-                    URL Vector
+                    Media URL
                 </button>
             </div>
 
             {/* Upload Mode */}
             {uploadMode === 'file' && (
                 <div className="space-y-4">
-                    <div className="relative border border-dashed border-[#333] bg-[#111111] p-10 hover:border-[#26cece] hover:bg-[#26cece]/5 transition-all cursor-pointer text-center group">
+                    <div className="relative border border-dashed border-[var(--border)] bg-[var(--surface)] p-10 hover:border-[var(--accent)] hover:bg-[var(--accent)]/5 transition-all cursor-pointer text-center group">
                         <input
                             type="file"
                             multiple
@@ -141,13 +141,13 @@ const MediaSelector = ({
                             className="absolute inset-0 opacity-0 cursor-pointer z-10"
                             onChange={handleFileSelect}
                         />
-                        <div className="mb-4 p-4 border border-[#333] bg-[#070707] inline-flex group-hover:bg-[#26cece] group-hover:border-[#26cece] transition-colors">
-                            <UploadCloud className="h-6 w-6 text-[#26cece] group-hover:text-[#070707]" />
+                        <div className="mb-4 p-4 border border-[var(--border)] bg-[var(--bg)] inline-flex group-hover:bg-[var(--accent)] group-hover:border-[var(--accent)] transition-colors">
+                            <UploadCloud className="h-6 w-6 text-[var(--accent)] group-hover:text-[var(--bg)]" />
                         </div>
-                        <p className="text-xs font-bold tracking-widest uppercase text-white mb-2">
-                            Initialize File Exchange
+                        <p className="text-xs font-bold text-[var(--text)] mb-2">
+                            Choose files
                         </p>
-                        <p className="text-[10px] tracking-widest uppercase text-gray-500">&gt; DROP FILES HERE OR CLICK TO BROWSE</p>
+                        <p className="text-xs text-[var(--muted)]">Drop files here, or click to browse</p>
                     </div>
 
                     {/* File Preview List */}
@@ -156,17 +156,17 @@ const MediaSelector = ({
                             {mediaFiles.map((file, idx) => (
                                 <div
                                     key={idx}
-                                    className="flex items-center justify-between p-3 bg-[#111111] border border-[#333] hover:border-[#26cece] transition-colors"
+                                    className="flex items-center justify-between p-3 bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors"
                                 >
                                     <div className="flex items-center gap-4 overflow-hidden">
-                                        <div className="h-10 w-10 bg-[#070707] border border-[#333] overflow-hidden shrink-0">
+                                        <div className="h-10 w-10 bg-[var(--bg)] border border-[var(--border)] overflow-hidden shrink-0">
                                             <img
                                                 src={mediaUrls[idx]}
                                                 alt=""
                                                 className="h-full w-full object-cover grayscale"
                                             />
                                         </div>
-                                        <span className="text-[10px] uppercase tracking-widest text-white truncate">
+                                        <span className="text-xs text-[var(--text)] truncate">
                                             {file.name}
                                         </span>
                                     </div>
@@ -187,8 +187,8 @@ const MediaSelector = ({
             {uploadMode === 'library' && (
                 <div className="space-y-4">
                     {loadingGraphics ? (
-                        <div className="flex items-center justify-center py-12 border border-[#333] bg-[#111111]">
-                            <div className="animate-spin rounded-none h-8 w-8 border-b-2 border-[#26cece]"></div>
+                        <div className="flex items-center justify-center py-12 border border-[var(--border)] bg-[var(--surface)]">
+                            <div className="animate-spin rounded-xl h-8 w-8 border-b-2 border-[var(--accent)]"></div>
                         </div>
                     ) : generatedGraphics.length > 0 ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-64 overflow-y-auto custom-scrollbar p-1">
@@ -197,8 +197,8 @@ const MediaSelector = ({
                                     key={job.id}
                                     onClick={() => selectGraphicFromLibrary(job)}
                                     className={`relative group cursor-pointer border transition-all ${mediaUrls.includes(job.flyer_url)
-                                            ? 'border-[#26cece] shadow-[0_2px_16px_0_rgba(0,0,0,0.4)] -translate-y-1'
-                                            : 'border-[#333] hover:border-[#26cece]'
+                                            ? 'border-[var(--accent)] shadow-xl -translate-y-1'
+                                            : 'border-[var(--border)] hover:border-[var(--accent)]'
                                         }`}
                                 >
                                     <img
@@ -208,13 +208,13 @@ const MediaSelector = ({
                                     />
                                     <div className="absolute inset-0 bg-black/50 group-hover:bg-black/20 transition-all flex items-center justify-center">
                                         {mediaUrls.includes(job.flyer_url) ? (
-                                            <CheckCircle2 className="h-8 w-8 text-[#26cece] opacity-100 bg-[#070707] rounded-full" />
+                                            <CheckCircle2 className="h-8 w-8 text-[var(--accent)] opacity-100 bg-[var(--bg)] rounded-full" />
                                         ) : (
-                                            <PlusCircle className="h-8 w-8 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" />
+                                            <PlusCircle className="h-8 w-8 text-[var(--text)] opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" />
                                         )}
                                     </div>
-                                    <div className="absolute bottom-0 left-0 right-0 bg-[#070707]/90 border-t border-[#333] p-2">
-                                        <p className="text-[10px] text-[#26cece] font-bold font-mono uppercase tracking-widest truncate">
+                                    <div className="absolute bottom-0 left-0 right-0 bg-[var(--bg)]/90 border-t border-[var(--border)] p-2">
+                                        <p className="text-xs text-[var(--accent)] font-bold truncate">
                                             {new Date(job.created_at).toLocaleDateString()}
                                         </p>
                                     </div>
@@ -222,27 +222,27 @@ const MediaSelector = ({
                             ))}
                         </div>
                     ) : (
-                        <div className="text-center py-10 bg-[#111111] border border-dashed border-[#333]">
-                            <ImageIcon className="h-10 w-10 mx-auto mb-4 text-[#333]" />
-                            <p className="text-xs font-bold tracking-widest uppercase text-white mb-2">No generated graphics yet</p>
-                            <p className="text-[10px] tracking-widest uppercase text-gray-500">
-                                &gt; Initialize generators in Design Matrix
+                        <div className="text-center py-10 bg-[var(--surface)] border border-dashed border-[var(--border)]">
+                            <ImageIcon className="h-10 w-10 mx-auto mb-4 text-[var(--border)]" />
+                            <p className="text-xs font-bold text-[var(--text)] mb-2">No saved images yet</p>
+                            <p className="text-xs text-[var(--muted)]">
+                                No generated images available
                             </p>
                         </div>
                     )}
 
                     {/* Selected From Library */}
                     {mediaUrls.filter(u => !u.startsWith('blob:')).length > 0 && (
-                        <div className="pt-4 border-t border-[#333]">
-                            <p className="text-[10px] font-bold font-mono tracking-widest text-[#26cece] uppercase mb-4 flex items-center gap-2">
-                                <span className="w-2 h-2 bg-[#26cece]"></span>
+                        <div className="pt-4 border-t border-[var(--border)]">
+                            <p className="text-xs font-bold text-[var(--accent)] mb-4 flex items-center gap-2">
+                                <span className="w-2 h-2 bg-[var(--accent)]"></span>
                                 Buffered Array Elements ({mediaUrls.filter(u => !u.startsWith('blob:')).length})
                             </p>
                             <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
                                 {mediaUrls
                                     .filter(u => !u.startsWith('blob:'))
                                     .map((url, idx) => (
-                                        <div key={idx} className="relative shrink-0 border border-[#333]">
+                                        <div key={idx} className="relative shrink-0 border border-[var(--border)]">
                                             <img
                                                 src={url}
                                                 alt=""
@@ -250,7 +250,7 @@ const MediaSelector = ({
                                             />
                                             <button
                                                 onClick={() => removeUrl(url)}
-                                                className="absolute -top-2 -right-2 p-1 bg-red-500 text-[#070707] hover:bg-white hover:text-red-500 hover:border-red-500 border border-transparent shadow-[2px_2px_0_0_#333] transition-colors"
+                                                className="absolute -top-2 -right-2 p-1 bg-red-500 text-[var(--bg)] hover:bg-white hover:text-red-500 hover:border-red-500 border border-transparent shadow-[2px_2px_0_0_var(--border)] transition-colors"
                                             >
                                                 <X className="h-3 w-3" />
                                             </button>
@@ -271,13 +271,13 @@ const MediaSelector = ({
                                 type="url"
                                 value={url}
                                 onChange={(e) => updateUrlAtIndex(idx, e.target.value)}
-                                placeholder="&gt; Paste external endpoint URL..."
-                                className="flex-1 px-4 py-3 border border-[#333] bg-[#111111] text-white focus:border-[#26cece] focus:ring-0 focus:outline-none transition-colors font-mono placeholder-gray-600 text-sm"
+                                placeholder="Paste an image or video URL"
+                                className="flex-1 px-4 py-3 border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] focus:border-[var(--accent)] focus:ring-0 focus:outline-none transition-colors placeholder-gray-600 text-sm"
                             />
                             {idx === mediaUrls.length - 1 && (
                                 <button
                                     onClick={addUrlField}
-                                    className="p-3 border border-[#333] bg-[#111111] hover:bg-[#26cece] hover:text-[#070707] hover:border-[#26cece] text-gray-500 transition-colors"
+                                    className="p-3 border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--accent)] hover:text-[var(--bg)] hover:border-[var(--accent)] text-[var(--muted)] transition-colors"
                                 >
                                     <PlusCircle className="h-5 w-5" />
                                 </button>

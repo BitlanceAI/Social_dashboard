@@ -4,5 +4,4 @@ export { default as MediaSelector } from './MediaSelector';
 export { default as StepAccount } from './steps/StepAccount';
 export { default as StepContent } from './steps/StepContent';
 export { default as StepSchedule } from './steps/StepSchedule';
-export { default as StepAdvanced } from './steps/StepAdvanced';
 export { default as StepReview } from './steps/StepReview';

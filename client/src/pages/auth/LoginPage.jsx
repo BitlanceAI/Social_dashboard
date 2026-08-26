@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { FullScreenLogin } from '../../components/ui/full-screen-login';
 import { trackLogin, trackLoginError } from '../../lib/analytics';
@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 
 const LoginPage = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const { signIn } = useAuth();
 
     const [email, setEmail] = useState('');
@@ -22,7 +23,14 @@ const LoginPage = () => {
             if (error) throw error;
             trackLogin('email');
             toast.success("Welcome back! 👋");
-            navigate('/home');
+            // AuthGuard saves the page the user was trying to reach. Returning
+            // there preserves query params — notably the ?oauth_success&token
+            // pair the Meta callback carries.
+            const from = location.state?.from;
+            const target = from
+                ? `${from.pathname}${from.search || ''}`
+                : '/socialdashboad';
+            navigate(target, { replace: true });
         } catch (error) {
             console.error(error);
             const message = error.message === "Invalid login credentials"

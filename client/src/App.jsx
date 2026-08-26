@@ -18,6 +18,8 @@ const LandingPage = lazy(() => import('./pages/public/LandingPage'));
 // Both legal pages are required for Meta App Review
 const PrivacyPolicy = lazy(() => import('./pages/public/PrivacyPolicy'));
 const TermsPage = lazy(() => import('./pages/public/TermsPage'));
+// Meta App Dashboard -> Settings -> Basic -> Data Deletion Instructions URL
+const DataDeletionPage = lazy(() => import('./pages/public/DataDeletionPage'));
 
 function App() {
   return (
@@ -32,7 +34,7 @@ function App() {
 
             {/* Meta dashboard — also the OAuth return target
                 (see META_RETURN_PATH in server/src/routes/social/metaRoutes.js) */}
-            <Route path="/dashboard/agents/meta" element={
+            <Route path="/socialdashboad" element={
               <AuthGuard>
                 <MetaAdsPage />
               </AuthGuard>
@@ -41,6 +43,7 @@ function App() {
             {/* Legal — linked from the Meta app dashboard */}
             <Route path="/privacy-policy" element={<PrivacyPolicy />} />
             <Route path="/terms-policy" element={<TermsPage />} />
+            <Route path="/data-deletion" element={<DataDeletionPage />} />
 
             {/* Landing */}
             <Route path="/" element={<LandingPage />} />

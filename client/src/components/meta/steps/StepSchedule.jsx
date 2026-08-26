@@ -14,32 +14,32 @@ const StepSchedule = ({ scheduledTime, onScheduleChange }) => {
     };
 
     return (
-        <div className="space-y-8 font-mono">
-            <h4 className="text-xl font-extrabold font-['Space_Grotesk'] text-white uppercase tracking-tight flex items-center gap-3 border-l-4 border-[#26cece] pl-3 mb-6">
-                <CalendarClock className="h-5 w-5 text-[#26cece]" /> Chronometric Setup
+        <div className="space-y-8">
+            <h4 className="text-xl font-extrabold font-['Space_Grotesk'] text-[var(--text)] tracking-tight flex items-center gap-3 border-l-4 border-[var(--accent)] pl-3 mb-6">
+                <CalendarClock className="h-5 w-5 text-[var(--accent)]" /> Pick a time
             </h4>
 
-            <div className="max-w-md bg-[#070707] border border-[#333] p-6 md:p-8">
-                <label className="block text-[10px] font-mono tracking-widest text-[#26cece] uppercase mb-4">
-                    Target Execution Time
+            <div className="max-w-md bg-[var(--bg)] border border-[var(--border)] p-6 md:p-8">
+                <label className="block text-xs text-[var(--accent)] mb-4">
+                    Publish time
                 </label>
                 <input
                     type="datetime-local"
                     value={scheduledTime}
                     onChange={(e) => onScheduleChange(e.target.value)}
                     min={getMinDateTime()}
-                    className="w-full px-4 py-3 border border-[#333] bg-[#111111] text-white focus:border-[#26cece] focus:ring-0 focus:outline-none transition-colors font-mono text-sm [color-scheme:dark]"
+                    className="w-full px-4 py-3 border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] focus:border-[var(--accent)] focus:ring-0 focus:outline-none transition-colors text-sm [color-scheme:dark]"
                 />
-                <p className="text-[10px] font-mono text-gray-500 mt-4 uppercase tracking-widest leading-relaxed">
+                <p className="text-xs text-[var(--muted)] mt-4 leading-relaxed">
                     &gt; Buffer requirement: 120,000ms minimum <br />
-                    <span className="font-bold text-[#26cece]">&gt; Input mapped to Indian Standard Time (IST)</span>
+                    <span className="font-bold text-[var(--accent)]">&gt; Input mapped to Indian Standard Time (IST)</span>
                 </p>
             </div>
 
             {/* Quick Schedule Options */}
             <div>
-                <p className="text-[10px] font-bold font-mono tracking-widest text-[#26cece] uppercase mb-4 flex items-center gap-2">
-                    <span className="w-2 h-2 bg-[#26cece]"></span> Macros (IST)
+                <p className="text-xs font-bold text-[var(--accent)] mb-4 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-[var(--accent)]"></span> Macros (IST)
                 </p>
                 <div className="flex flex-wrap gap-3">
                     {[
@@ -62,7 +62,7 @@ const StepSchedule = ({ scheduledTime, onScheduleChange }) => {
                                 const localISOTime = (new Date(date.getTime() - offset)).toISOString().slice(0, 16);
                                 onScheduleChange(localISOTime);
                             }}
-                            className="px-4 py-3 border border-[#333] bg-[#111111] text-[10px] font-mono uppercase tracking-widest text-gray-400 hover:bg-[#26cece] hover:text-[#070707] hover:border-[#26cece] hover:font-bold hover:shadow-[2px_2px_0_0_#333] transition-all"
+                            className="px-4 py-3 border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--muted)] hover:bg-[var(--accent)] hover:text-[var(--bg)] hover:border-[var(--accent)] hover:font-bold hover:shadow-[2px_2px_0_0_var(--border)] transition-all"
                         >
                             {option.label}
                         </button>

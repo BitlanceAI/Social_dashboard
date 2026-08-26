@@ -33,7 +33,8 @@ features do not exist in this app yet.
 - [ ] `META_REDIRECT_URI` set to `https://<your-api-domain>/api/meta/oauth/callback` **and** added to App Dashboard → Facebook Login → Settings → Valid OAuth Redirect URIs (must match exactly)
 - [ ] `FRONTEND_URL` set to your deployed client origin
 - [ ] Deauthorize Callback URL set to `https://<your-api-domain>/api/meta/deauthorize`
-- [ ] Data Deletion Request URL set to `https://<your-api-domain>/api/meta/data-deletion`
+- [ ] Data Deletion Request URL set to `https://<your-api-domain>/api/meta/data-deletion` (the signed-request callback)
+- [ ] Data Deletion Instructions URL set to `https://<your-domain>/data-deletion` (the human-readable page)
 - [ ] 1024×1024 app icon uploaded
 - [ ] Privacy Policy URL set to `https://<your-domain>/privacy-policy`
 - [ ] Terms of Service URL set to `https://<your-domain>/terms-policy`
@@ -78,7 +79,7 @@ linked to the test Facebook Page. If it is a personal account,
 **Screencast steps:**
 
 1. Open `https://<your-domain>/login` and sign in with the reviewer credentials.
-2. You land on the Meta dashboard at `/dashboard/agents/meta`.
+2. You land on the Meta dashboard at `/socialdashboad`.
 3. Click **Connect Meta Account**.
 4. Complete the Facebook Login dialog and grant the requested permissions.
 5. You are returned to the Meta dashboard. The **Connected Pages** section now
@@ -105,18 +106,17 @@ linked to the test Facebook Page. If it is a personal account,
 **Screencast steps:**
 
 1. Open `https://<your-domain>/login` and sign in with the reviewer credentials.
-2. You land on the Meta dashboard at `/dashboard/agents/meta`.
+2. You land on the Meta dashboard at `/socialdashboad`.
 3. Click **Connect Meta Account** and complete the Facebook Login dialog (skip if
    already connected in the same recording).
-4. Click **Schedule Post** to open the 5-step composer.
+4. Click **Schedule Post** to open the 4-step composer.
 5. **Step 1 — Account:** select the Facebook Page. Under **Publish To**, click
    the **Instagram** tile so it is highlighted. (The tile is disabled for Pages
    with no linked Instagram Business account.)
 6. **Step 2 — Content:** upload an image or video and type a caption.
    Instagram does not accept text-only posts, so the form requires media here.
 7. **Step 3 — Schedule:** pick the publication date and time.
-8. **Step 4 — Advanced:** optional; continue.
-9. **Step 5 — Review:** confirm the summary, then submit.
+8. **Review:** confirm the summary, then submit.
 10. The post appears under **Scheduled Posts** with status `pending`.
 11. When the scheduled time arrives, the status changes to `published`.
 12. Open the Instagram account in the mobile app or on the web and show the new

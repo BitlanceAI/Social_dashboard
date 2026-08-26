@@ -368,6 +368,66 @@ class MetaService {
     }
 
     /**
+     * Engagement for one published post.
+     *
+     * Facebook exposes reaction/comment/share counts on the Page post itself;
+     * Instagram exposes like_count / comments_count on the media node. Both
+     * are covered by pages_read_engagement / instagram_basic — no ads or
+     * insights permissions involved.
+     */
+    async getPostMetrics(platform, postId, pageAccessToken) {
+        const service = new MetaService(pageAccessToken || this.accessToken);
+
+        if (platform === 'instagram') {
+            const r = await service.request('GET', `/${postId}`, {}, {
+                fields: 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count'
+            });
+            if (!r.success) return r;
+            const m = r.data || {};
+            return {
+                success: true,
+                metrics: {
+                    likes: m.like_count ?? null,
+                    comments: m.comments_count ?? null,
+                    shares: null,
+                    permalink: m.permalink || null,
+                    thumbnail: m.thumbnail_url || m.media_url || null,
+                    publishedAt: m.timestamp || null
+                }
+            };
+        }
+
+        // A single-image post is published via /{page}/photos, so the id we
+        // stored is a photo node — it has `link`/`picture` and no
+        // `permalink_url` or `shares`. Try the feed-post shape, then fall back.
+        const COUNTS = 'likes.summary(true).limit(0),comments.summary(true).limit(0)';
+
+        let r = await service.request('GET', `/${postId}`, {}, {
+            fields: `id,created_time,permalink_url,full_picture,shares,${COUNTS}`
+        });
+
+        if (!r.success && r.code === 100) {
+            r = await service.request('GET', `/${postId}`, {}, {
+                fields: `id,created_time,link,picture,${COUNTS}`
+            });
+        }
+
+        if (!r.success) return r;
+        const d = r.data || {};
+        return {
+            success: true,
+            metrics: {
+                likes: d.likes?.summary?.total_count ?? null,
+                comments: d.comments?.summary?.total_count ?? null,
+                shares: d.shares?.count ?? 0,
+                permalink: d.permalink_url || d.link || null,
+                thumbnail: d.full_picture || d.picture || null,
+                publishedAt: d.created_time || null
+            }
+        };
+    }
+
+    /**
      * Remaining Instagram publishing quota (25 posts / 24h per account).
      */
     async getInstagramPublishingLimit(igUserId, pageAccessToken) {

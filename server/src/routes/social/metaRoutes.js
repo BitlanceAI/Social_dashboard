@@ -37,7 +37,7 @@ const META_REDIRECT_URI = process.env.META_REDIRECT_URI || 'http://localhost:300
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 // Where the OAuth callback bounces the browser back to. Must be a real client
 // route — MetaAdsPage reads ?oauth_success / ?token / ?error from it.
-const META_RETURN_PATH = process.env.META_RETURN_PATH || '/dashboard/agents/meta';
+const META_RETURN_PATH = process.env.META_RETURN_PATH || '/socialdashboad';
 const returnUrl = (query) => `${FRONTEND_URL}${META_RETURN_PATH}?${query}`;
 
 // Apply auth middleware to all routes except the OAuth redirect callback,
@@ -248,9 +248,14 @@ router.post('/connect-api-key', async (req, res) => {
 
         const { data: existingConn } = await supabase
             .from('meta_connections')
-            .select('whatsapp_phone_id, waba_id')
+            .select('whatsapp_phone_id, waba_id, meta_user_id, selected_page_ids')
             .eq('user_id', userId)
             .single();
+
+        // Reconnecting the same Meta account keeps the chosen Pages; a
+        // different account starts over, or we would filter against stale ids.
+        const sameAccount = existingConn?.meta_user_id === profile.data.id;
+        const carriedSelection = sameAccount ? (existingConn?.selected_page_ids ?? null) : null;
 
         const { error } = await supabase
             .from('meta_connections')
@@ -270,6 +275,7 @@ router.post('/connect-api-key', async (req, res) => {
                 // Preserve existing WhatsApp config if present
                 whatsapp_phone_id: existingConn?.whatsapp_phone_id || null,
                 waba_id: existingConn?.waba_id || null,
+                selected_page_ids: carriedSelection,
                 updated_at: new Date().toISOString()
             }, {
                 onConflict: 'user_id'
@@ -384,13 +390,31 @@ router.get('/connection', async (req, res) => {
         const metaService = new MetaService(decryptedToken);
         const validation = await metaService.validateToken();
 
-        const pages = connection.pages || [];
+        const allPages = connection.pages || [];
+        const selectedIds = connection.selected_page_ids;
+
+        // null = the user has not chosen yet, so prompt them. An empty array is
+        // a deliberate "none", and is respected.
+        const needsPageSelection = selectedIds === null || selectedIds === undefined;
+        const pages = needsPageSelection
+            ? []
+            : allPages.filter((p) => selectedIds.includes(String(p.id)));
 
         res.json({
             connected: true,
             isValid: validation.isValid,
             grantedScopes: validation.scopes || [],
             expiresAt: connection.token_expires_at,
+            needsPageSelection,
+            // Every Page Meta returned, for the picker
+            availablePages: allPages.map((p) => ({
+                id: p.id,
+                name: p.name,
+                category: p.category,
+                picture: p.picture,
+                instagram_business_account: p.instagram_business_account || null
+            })),
+            selectedPageIds: needsPageSelection ? [] : selectedIds,
             pages,
             // Instagram Business accounts reachable through the connected pages
             instagramAccounts: pages
@@ -451,11 +475,20 @@ router.post('/refresh-accounts', async (req, res) => {
         const pagesResult = await metaService.getPages();
         const adAccountsResult = await metaService.getAdAccounts();
 
+        const freshPages = pagesResult.success ? pagesResult.pages : connection.pages;
+
+        // Keep the user's choice, minus any Page they no longer manage
+        const stillAvailable = (freshPages || []).map((p) => String(p.id));
+        const prunedSelection = Array.isArray(connection.selected_page_ids)
+            ? connection.selected_page_ids.filter((id) => stillAvailable.includes(String(id)))
+            : connection.selected_page_ids;
+
         const { error: updateError } = await supabase
             .from('meta_connections')
             .update({
-                pages: pagesResult.success ? pagesResult.pages : connection.pages,
+                pages: freshPages,
                 ad_accounts: adAccountsResult.success ? adAccountsResult.adAccounts : connection.ad_accounts,
+                selected_page_ids: prunedSelection,
                 updated_at: new Date().toISOString()
             })
             .eq('user_id', req.user.id);
@@ -470,6 +503,49 @@ router.post('/refresh-accounts', async (req, res) => {
 
     } catch (error) {
         console.error('Refresh accounts error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * Choose which Pages to connect
+ * POST /api/meta/pages/select   body: { pageIds: string[] }
+ *
+ * The full Page list stays in `pages` (we need it for the picker and for
+ * page access tokens); this records the subset the user opted into.
+ */
+router.post('/pages/select', async (req, res) => {
+    try {
+        const { pageIds } = req.body;
+
+        if (!Array.isArray(pageIds)) {
+            return res.status(400).json({ error: 'pageIds must be an array' });
+        }
+
+        const ctx = await loadConnection(req, res);
+        if (!ctx) return;
+
+        const available = (ctx.connection.pages || []).map((p) => String(p.id));
+        const invalid = pageIds.filter((id) => !available.includes(String(id)));
+        if (invalid.length) {
+            return res.status(400).json({ error: `Not available on this connection: ${invalid.join(', ')}` });
+        }
+
+        const { error } = await supabase
+            .from('meta_connections')
+            .update({
+                selected_page_ids: pageIds.map(String),
+                updated_at: new Date().toISOString()
+            })
+            .eq('user_id', req.user.id);
+
+        if (error) throw error;
+
+        console.log(`[Meta] User ${req.user.id} connected ${pageIds.length} page(s)`);
+        res.json({ success: true, selectedPageIds: pageIds.map(String) });
+
+    } catch (error) {
+        console.error('Select pages error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -540,7 +616,22 @@ router.get('/instagram/media', async (req, res) => {
             return handleMetaError(res, req.user.id, media);
         }
 
-        res.json({ success: true, account: igResult.instagramAccount, media: media.data.data || [] });
+        // Remaining publishing quota (Meta allows 25 posts / 24h per account).
+        // Non-fatal: if it fails we still return the media.
+        const limitResult = await ctx.metaService.getInstagramPublishingLimit(
+            igResult.instagramAccount.id,
+            tokenResult.pageAccessToken
+        );
+        const quota = limitResult.success ? (limitResult.data.data?.[0] || null) : null;
+
+        res.json({
+            success: true,
+            account: igResult.instagramAccount,
+            media: media.data.data || [],
+            publishingLimit: quota
+                ? { used: quota.quota_usage ?? 0, total: quota.config?.quota_total ?? 25 }
+                : null
+        });
 
     } catch (error) {
         console.error('Get Instagram media error:', error);
@@ -605,6 +696,39 @@ router.post('/posts/publish', async (req, res) => {
         }
 
         const anySuccess = Object.values(results).some((r) => r.success);
+
+        // Record the attempt so an immediate publish shows up in Post History
+        // and counts toward the delivery stats, exactly like a scheduled one.
+        const publishedIds = Object.values(results).filter((r) => r.success).map((r) => r.postId);
+        const failures = Object.entries(results)
+            .filter(([, r]) => !r.success)
+            .map(([platform, r]) => `${platform}: ${r.error}`);
+
+        const { error: recordError } = await supabase
+            .from('scheduled_posts')
+            .insert({
+                user_id: req.user.id,
+                meta_connection_id: ctx.connection.id,
+                page_id: pageId,
+                page_name: page.name,
+                platforms,
+                content,
+                media_urls: mediaUrls || [],
+                link_url: linkUrl || null,
+                // Published immediately, so the slot is now
+                scheduled_time: new Date().toISOString(),
+                status: anySuccess ? 'published' : 'failed',
+                published_at: anySuccess ? new Date().toISOString() : null,
+                meta_post_id: publishedIds[0] || null,
+                publish_results: results,
+                error_message: failures.length ? failures.join('; ') : null
+            });
+
+        // Never fail the request over bookkeeping — the post is already live.
+        if (recordError) {
+            console.error('Publish recorded to Meta but not to scheduled_posts:', recordError);
+        }
+
         res.status(anySuccess ? 200 : 400).json({
             success: anySuccess,
             page: { id: page.id, name: page.name },
@@ -750,6 +874,75 @@ router.delete('/posts/:id', async (req, res) => {
 
     } catch (error) {
         console.error('Delete post error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * Engagement for the posts this app published
+ * GET /api/meta/posts/metrics?limit=20
+ *
+ * Reads the user's own publish history and asks Meta for each post's counts,
+ * so the numbers line up with Post History rather than with everything that
+ * happens to be on the connected Instagram account.
+ */
+router.get('/posts/metrics', async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
+
+        const ctx = await loadConnection(req, res);
+        if (!ctx) return;
+
+        const { data: posts, error } = await supabase
+            .from('scheduled_posts')
+            .select('id, page_id, page_name, content, platforms, publish_results, published_at, media_urls')
+            .eq('user_id', req.user.id)
+            .eq('status', 'published')
+            .order('published_at', { ascending: false })
+            .limit(limit);
+
+        if (error) throw error;
+        if (!posts || posts.length === 0) return res.json({ success: true, posts: [] });
+
+        // One Page token per Page, not per post
+        const tokenCache = new Map();
+        const pageToken = async (pageId) => {
+            if (!tokenCache.has(pageId)) {
+                const r = await ctx.metaService.getPageToken(pageId);
+                tokenCache.set(pageId, r.success ? r.pageAccessToken : null);
+            }
+            return tokenCache.get(pageId);
+        };
+
+        const enriched = await Promise.all(posts.map(async (post) => {
+            const token = await pageToken(post.page_id);
+            const results = post.publish_results || {};
+            const metrics = {};
+
+            for (const [platform, r] of Object.entries(results)) {
+                if (!r?.success || !r.postId || !token) continue;
+                const m = await ctx.metaService.getPostMetrics(platform, r.postId, token);
+                // A deleted post returns an error; report it rather than a zero
+                metrics[platform] = m.success
+                    ? m.metrics
+                    : { unavailable: true, error: m.error };
+            }
+
+            return {
+                id: post.id,
+                content: post.content,
+                pageName: post.page_name,
+                platforms: post.platforms || ['facebook'],
+                publishedAt: post.published_at,
+                mediaUrl: (post.media_urls || [])[0] || null,
+                metrics
+            };
+        }));
+
+        res.json({ success: true, posts: enriched });
+
+    } catch (error) {
+        console.error('Post metrics error:', error);
         res.status(500).json({ error: error.message });
     }
 });
