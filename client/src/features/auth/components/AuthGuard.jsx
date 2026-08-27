@@ -1,6 +1,6 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from "../../context/AuthContext";
+import { useAuth } from "@/features/auth/context/AuthContext";
 
 const AuthGuard = ({ children }) => {
     const { user, loading } = useAuth();

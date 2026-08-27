@@ -28,7 +28,7 @@ service-account.json
 *-credentials.json
 *-service-account.json
 google-credentials.json
-server/config/google-credentials.json
+server/secrets/google-credentials.json
 
 # ===============================
 # Build & Output
@@ -75,3 +75,7 @@ myenv/
 
 # Supabase CLI local state
 supabase/.temp/
+
+# Templates are safe to track
+!.env.example
+!*.env.example

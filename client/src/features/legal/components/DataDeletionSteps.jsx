@@ -1,5 +1,5 @@
 import React from 'react';
-import { BODY, CARD, CARD_TITLE, LIST } from './LegalLayout';
+import { BODY, CARD, CARD_TITLE, LIST } from '@/features/legal/components/LegalLayout';
 
 /**
  * Data deletion instructions.

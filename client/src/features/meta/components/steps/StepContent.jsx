@@ -1,6 +1,6 @@
 import React from 'react';
 import { FileText, Link2 } from 'lucide-react';
-import MediaSelector from '../MediaSelector';
+import MediaSelector from '@/features/meta/components/MediaSelector';
 
 /**
  * Step 2: Content Creation

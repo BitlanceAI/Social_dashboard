@@ -11,7 +11,7 @@ import {
     Facebook,
     ExternalLink,
 } from 'lucide-react';
-import API_BASE_URL from '../../config';
+import API_BASE_URL from '@/shared/config';
 
 /**
  * Analytics panel.

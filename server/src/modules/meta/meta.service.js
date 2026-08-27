@@ -7,6 +7,9 @@
  * third-party relay in this path.
  */
 
+// Process-wide env bootstrap — these module-scope reads need it loaded.
+import '../../config/env.js';
+
 import axios from 'axios';
 
 const META_API_VERSION = process.env.META_API_VERSION || 'v21.0';

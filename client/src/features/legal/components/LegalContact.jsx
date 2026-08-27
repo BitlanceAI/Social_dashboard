@@ -1,6 +1,6 @@
 import React from 'react';
 import { Mail, MapPin, Phone } from 'lucide-react';
-import { BODY, CARD, CARD_TITLE } from './LegalLayout';
+import { BODY, CARD, CARD_TITLE } from '@/features/legal/components/LegalLayout';
 
 /**
  * Contact block shared by the legal pages. Same card scale as every other

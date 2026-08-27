@@ -1,13 +1,12 @@
 {
-    "name": "voice-agent-server",
+    "name": "automation-dashboard-server",
     "version": "1.0.0",
-    "description": "Backend for Retell AI Voice Agent",
-    "main": "src/index.js",
+    "description": "Meta (Facebook + Instagram) automation backend",
+    "main": "src/server.js",
     "type": "module",
     "scripts": {
-        "nodemon": "nodemon src/index.js",
-        "start": "node src/index.js",
-        "dev": "node --watch -r dotenv/config src/index.js",
+        "start": "node src/server.js",
+        "dev": "node --watch src/server.js",
         "build": "echo 'No build necessary for backend'"
     },
     "dependencies": {

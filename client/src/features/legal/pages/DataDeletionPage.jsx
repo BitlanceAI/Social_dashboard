@@ -1,7 +1,7 @@
 import React from 'react';
-import SEOHead from '../../components/layout/SEOHead';
-import LegalLayout from '../../components/legal/LegalLayout';
-import DataDeletionSteps from '../../components/legal/DataDeletionSteps';
+import SEOHead from '@/shared/components/layout/SEOHead';
+import LegalLayout from '@/features/legal/components/LegalLayout';
+import DataDeletionSteps from '@/features/legal/components/DataDeletionSteps';
 
 /**
  * Standalone data deletion instructions.

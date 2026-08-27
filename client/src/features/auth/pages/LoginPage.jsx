@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { FullScreenLogin } from '../../components/ui/full-screen-login';
-import { trackLogin, trackLoginError } from '../../lib/analytics';
+import { useAuth } from '@/features/auth/context/AuthContext';
+import { FullScreenLogin } from '@/shared/components/ui/full-screen-login';
+import { trackLogin, trackLoginError } from '@/shared/lib/analytics';
 import toast from 'react-hot-toast';
 
 const LoginPage = () => {

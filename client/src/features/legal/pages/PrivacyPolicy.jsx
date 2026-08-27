@@ -1,8 +1,8 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import SEOHead from '../../components/layout/SEOHead';
-import LegalLayout, { BODY, LIST, LegalSection } from '../../components/legal/LegalLayout';
-import LegalContact from '../../components/legal/LegalContact';
+import SEOHead from '@/shared/components/layout/SEOHead';
+import LegalLayout, { BODY, LIST, LegalSection } from '@/features/legal/components/LegalLayout';
+import LegalContact from '@/features/legal/components/LegalContact';
 
 const A = 'text-[var(--accent)] hover:underline';
 const SUBHEAD = 'text-[10px] font-mono uppercase tracking-widest text-[var(--muted)] mb-2';

@@ -5,10 +5,13 @@
  * permission, then posts it here so the server can reach that device later.
  */
 
+// Process-wide env bootstrap — these module-scope reads need it loaded.
+import '../../config/env.js';
+
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
-import { authenticateUser } from '../../middleware/authMiddleware.js';
-import { isPushEnabled, sendToUser } from '../../services/push/fcmService.js';
+import { authenticateUser } from '../../middleware/auth.js';
+import { isPushEnabled, sendToUser } from './push.service.js';
 
 const router = express.Router();
 

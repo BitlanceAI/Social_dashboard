@@ -1,7 +1,12 @@
-// Meta Components - Export all components for easy importing
-export { default as SchedulePostModal } from './SchedulePostModal';
-export { default as MediaSelector } from './MediaSelector';
-export { default as StepAccount } from './steps/StepAccount';
-export { default as StepContent } from './steps/StepContent';
-export { default as StepSchedule } from './steps/StepSchedule';
-export { default as StepReview } from './steps/StepReview';
+export { default as MetaAdsPage } from '@/features/meta/pages/MetaAdsPage';
+export { default as AnalyticsPanel } from '@/features/meta/components/AnalyticsPanel';
+export { default as CreatePostHub } from '@/features/meta/components/CreatePostHub';
+export { default as DashboardSidebar } from '@/features/meta/components/DashboardSidebar';
+export { default as PageSelectModal } from '@/features/meta/components/PageSelectModal';
+export { default as SocialProfilesPanel } from '@/features/meta/components/SocialProfilesPanel';
+export { default as SchedulePostModal } from '@/features/meta/components/SchedulePostModal';
+export { default as MediaSelector } from '@/features/meta/components/MediaSelector';
+export { default as StepAccount } from '@/features/meta/components/steps/StepAccount';
+export { default as StepContent } from '@/features/meta/components/steps/StepContent';
+export { default as StepSchedule } from '@/features/meta/components/steps/StepSchedule';
+export { default as StepReview } from '@/features/meta/components/steps/StepReview';

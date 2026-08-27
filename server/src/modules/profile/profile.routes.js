@@ -1,6 +1,6 @@
 import express from 'express';
-import { getProfiles, createProfile, updateProfile, deleteProfile } from '../../controllers/auth/profileController.js';
-import { supabase } from '../../config/supabaseClient.js';
+import { getProfiles, createProfile, updateProfile, deleteProfile } from './profile.controller.js';
+import { supabase } from '../../config/supabase.js';
 
 const router = express.Router();
 

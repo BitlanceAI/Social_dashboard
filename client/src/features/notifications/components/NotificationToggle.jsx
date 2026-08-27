@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import {
     pushConfigured, pushSupported, permissionState,
     enablePush, disablePush, onForegroundMessage,
-} from '../../lib/push';
+} from '@/features/notifications/lib/push';
 
 /**
  * Notification opt-in.

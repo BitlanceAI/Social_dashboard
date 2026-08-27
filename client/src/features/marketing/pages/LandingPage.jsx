@@ -16,9 +16,9 @@ import {
     Sun,
     Moon,
 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
-import { useTheme } from '../../context/ThemeContext';
-import Logo from '../../components/layout/Logo';
+import { useAuth } from '@/features/auth/context/AuthContext';
+import { useTheme } from '@/shared/context/ThemeContext';
+import Logo from '@/shared/components/layout/Logo';
 
 /**
  * Product landing page.

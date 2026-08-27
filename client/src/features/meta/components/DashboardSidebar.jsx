@@ -1,9 +1,9 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import Logo from '../layout/Logo';
-import { useAuth } from '../../context/AuthContext';
+import Logo from '@/shared/components/layout/Logo';
+import { useAuth } from '@/features/auth/context/AuthContext';
 import toast from 'react-hot-toast';
-import { useTheme } from '../../context/ThemeContext';
+import { useTheme } from '@/shared/context/ThemeContext';
 import {
     UserCircle,
     CalendarClock,

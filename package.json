@@ -1,15 +1,22 @@
 {
-    "name": "voice-agent-dashboard",
+    "name": "automation-dashboard",
     "version": "1.0.0",
-    "description": "Retell AI Voice Agent Dashboard",
+    "description": "Meta (Facebook + Instagram) automation dashboard \u2014 React client + Express server",
     "scripts": {
-        "start": "node server/src/index.js",
-        "build": "npm install --legacy-peer-deps && npm install --prefix client --legacy-peer-deps && npm run build --prefix client && npm install --prefix server --legacy-peer-deps"
+        "dev": "concurrently -n client,server -c cyan,magenta \"npm run dev -w client\" \"npm run dev -w server\"",
+        "start": "npm run start -w server",
+        "build": "npm install --legacy-peer-deps && npm run build -w client",
+        "lint": "npm run lint -w client"
     },
     "engines": {
         "node": ">=18.0.0"
     },
     "dependencies": {
         "concurrently": "^8.0.0"
-    }
+    },
+    "private": true,
+    "workspaces": [
+        "client",
+        "server"
+    ]
 }

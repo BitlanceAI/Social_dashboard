@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Facebook, Instagram } from 'lucide-react';
-import AnalyticsPanel from '../../components/dashboard/AnalyticsPanel';
-import CreatePostHub from '../../components/dashboard/CreatePostHub';
-import SocialProfilesPanel from '../../components/dashboard/SocialProfilesPanel';
-import PageSelectModal from '../../components/dashboard/PageSelectModal';
-import NotificationToggle from '../../components/dashboard/NotificationToggle';
+import AnalyticsPanel from '@/features/meta/components/AnalyticsPanel';
+import CreatePostHub from '@/features/meta/components/CreatePostHub';
+import SocialProfilesPanel from '@/features/meta/components/SocialProfilesPanel';
+import PageSelectModal from '@/features/meta/components/PageSelectModal';
+import NotificationToggle from '@/features/notifications/components/NotificationToggle';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { supabase } from '../../services/supabaseClient';
+import { useAuth } from '@/features/auth/context/AuthContext';
+import { supabase } from '@/shared/lib/supabase';
 import toast from 'react-hot-toast';
 import {
     BarChart3,
@@ -49,11 +49,11 @@ import {
     StepContent,
     StepSchedule,
     StepReview
-} from '../../components/meta';
+} from '@/features/meta';
 
-import API_BASE_URL from '../../config';
+import API_BASE_URL from '@/shared/config';
 
-import DashboardSidebar, { DashboardMobileNav } from '../../components/dashboard/DashboardSidebar';
+import DashboardSidebar, { DashboardMobileNav } from '@/features/meta/components/DashboardSidebar';
 
 const MetaAdsPage = () => {
     const navigate = useNavigate();

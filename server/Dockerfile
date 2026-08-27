@@ -16,7 +16,7 @@ RUN npm ci --only=production
 
 # Copy source code
 COPY src/ ./src/
-COPY utils/ ./utils/
+
 
 # Azure App Service injects PORT, but default to 3001
 ENV PORT=3001
@@ -26,4 +26,4 @@ EXPOSE 3001
 
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "src/index.js"]
+CMD ["node", "src/server.js"]

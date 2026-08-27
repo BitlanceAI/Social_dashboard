@@ -1,12 +1,6 @@
-// In production, do NOT disable TLS verification.
-// If you truly need this (e.g. debugging a bad certificate chain), set `INSECURE_TLS=true`.
-if (process.env.INSECURE_TLS === 'true' || process.env.NODE_ENV !== 'production') {
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-}
+import './env.js';
 
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-dotenv.config();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;

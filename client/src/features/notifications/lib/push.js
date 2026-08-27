@@ -10,7 +10,7 @@
 
 import { initializeApp, getApps } from 'firebase/app';
 import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
-import API_BASE_URL from '../config';
+import API_BASE_URL from '@/shared/config';
 
 // Only what Cloud Messaging actually needs. `authDomain` (Firebase Auth) and
 // `storageBucket` (Cloud Storage) are part of the boilerplate config object

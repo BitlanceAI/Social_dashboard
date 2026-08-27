@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '../../config/supabaseClient.js';
+import { supabaseAdmin } from '../../config/supabase.js';
 
 // Get all profiles for a user
 export const getProfiles = async (req, res) => {

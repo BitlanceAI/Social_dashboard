@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import Logo from '../layout/Logo';
+import Logo from '@/shared/components/layout/Logo';
 
 /**
  * Shared chrome for the three legal pages — Privacy Policy, Terms of Service

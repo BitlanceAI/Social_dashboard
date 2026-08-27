@@ -5,10 +5,13 @@
  * Facebook Page and/or linked Instagram Business account it targets.
  */
 
+// Process-wide env bootstrap — these module-scope reads need it loaded.
+import '../../config/env.js';
+
 import { createClient } from '@supabase/supabase-js';
-import MetaService from '../social/metaService.js';
-import { decryptData } from '../../../utils/encryption.js';
-import { sendToUser } from '../push/fcmService.js';
+import MetaService from '../meta/meta.service.js';
+import { decryptData } from '../../shared/utils/encryption.js';
+import { sendToUser } from '../push/push.service.js';
 
 let supabase;
 

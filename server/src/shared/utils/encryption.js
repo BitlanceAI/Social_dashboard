@@ -1,3 +1,6 @@
+// Process-wide env bootstrap — these module-scope reads need it loaded.
+import '../../config/env.js';
+
 import crypto from 'crypto';
 
 // Encryption key should be set in environment variables (32 bytes = 64 hex characters)

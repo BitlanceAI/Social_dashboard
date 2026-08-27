@@ -10,6 +10,9 @@
 
 // Modular ESM entry points. The CommonJS default export does not expose
 // `credential` under ESM, so `admin.credential.cert` is undefined there.
+// Process-wide env bootstrap — these module-scope reads need it loaded.
+import '../../config/env.js';
+
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { createClient } from '@supabase/supabase-js';

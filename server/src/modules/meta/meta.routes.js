@@ -6,13 +6,16 @@
  * Meta Graph API.
  */
 
+// Process-wide env bootstrap — these module-scope reads need it loaded.
+import '../../config/env.js';
+
 import crypto from 'crypto';
 import express from 'express';
 import multer from 'multer';
 import { createClient } from '@supabase/supabase-js';
-import MetaService from '../../services/social/metaService.js';
-import { authenticateUser } from '../../middleware/authMiddleware.js';
-import { encryptData, decryptData } from '../../../utils/encryption.js';
+import MetaService from './meta.service.js';
+import { authenticateUser } from '../../middleware/auth.js';
+import { encryptData, decryptData } from '../../shared/utils/encryption.js';
 
 const router = express.Router();
 
