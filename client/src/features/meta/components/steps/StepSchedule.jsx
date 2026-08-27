@@ -6,7 +6,7 @@ import { CalendarClock, AlertCircle } from 'lucide-react';
  *
  * The <input type="datetime-local"> works in the browser's LOCAL time, so
  * every value here is built from local components. Converting to UTC happens
- * once, at submit, in MetaAdsPage.
+ * once, at submit, in MetaDashboardPage.
  */
 
 /** Format a Date as the `YYYY-MM-DDTHH:mm` the input expects, in local time. */

@@ -6,7 +6,7 @@ import { AuthGuard } from '@/features/auth';
 // ─── Lazy-loaded pages (route-level code splitting) ───────────────────────────
 const LoginPage        = lazy(() => import('@/features/auth/pages/LoginPage'));
 const SignupPage       = lazy(() => import('@/features/auth/pages/SignupPage'));
-const MetaAdsPage      = lazy(() => import('@/features/meta/pages/MetaAdsPage'));
+const MetaDashboardPage = lazy(() => import('@/features/meta/pages/MetaDashboardPage'));
 const LandingPage      = lazy(() => import('@/features/marketing/pages/LandingPage'));
 const PrivacyPolicy    = lazy(() => import('@/features/legal/pages/PrivacyPolicy'));
 const TermsPage        = lazy(() => import('@/features/legal/pages/TermsPage'));
@@ -25,7 +25,7 @@ export const routes = [
 
   // Meta dashboard — also the OAuth return target
   // (see META_RETURN_PATH in server/src/modules/meta/meta.routes.js)
-  { path: '/socialdashboad', element: guarded(<MetaAdsPage />) },
+  { path: '/socialdashboad', element: guarded(<MetaDashboardPage />) },
 
   // Legal — linked from the Meta app dashboard; both are required for Meta App Review
   { path: '/privacy-policy', element: <PrivacyPolicy /> },

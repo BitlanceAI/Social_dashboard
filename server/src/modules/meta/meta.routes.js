@@ -1,9 +1,11 @@
 /**
  * Meta (Facebook / Instagram) API Routes
  *
- * Handles Meta account connection, Facebook Page + Instagram publishing,
- * post scheduling and ad campaign reporting — all through the official
- * Meta Graph API.
+ * Handles Meta account connection, Facebook Page + Instagram publishing
+ * and post scheduling — all through the official Meta Graph API.
+ *
+ * Ads (campaigns, insights, account balance, Conversions API) are out of
+ * scope; the permissions for them are not requested at OAuth time either.
  */
 
 // Process-wide env bootstrap — these module-scope reads need it loaded.
@@ -39,7 +41,7 @@ const META_APP_SECRET = process.env.META_APP_SECRET;
 const META_REDIRECT_URI = process.env.META_REDIRECT_URI || 'http://localhost:3001/api/meta/oauth/callback';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 // Where the OAuth callback bounces the browser back to. Must be a real client
-// route — MetaAdsPage reads ?oauth_success / ?token / ?error from it.
+// route — MetaDashboardPage reads ?oauth_success / ?token / ?error from it.
 const META_RETURN_PATH = process.env.META_RETURN_PATH || '/socialdashboad';
 const returnUrl = (query) => `${FRONTEND_URL}${META_RETURN_PATH}?${query}`;
 
@@ -237,8 +239,7 @@ router.post('/connect-api-key', async (req, res) => {
         }
 
         const pagesResult = await metaService.getPages();
-        const adAccountsResult = await metaService.getAdAccounts();
-        console.log(`✅ [Meta Connect] Pages: ${pagesResult.success ? pagesResult.pages?.length : 'failed'}, AdAccounts: ${adAccountsResult.success ? adAccountsResult.adAccounts?.length : 'failed'}`);
+        console.log(`✅ [Meta Connect] Pages: ${pagesResult.success ? pagesResult.pages?.length : 'failed'}`);
 
         let encryptedToken, encryptedAppSecret;
         try {
@@ -273,7 +274,6 @@ router.post('/connect-api-key', async (req, res) => {
                 app_secret: encryptedAppSecret,
                 token_expires_at: validation.expiresAt,
                 pages: pagesResult.success ? pagesResult.pages : [],
-                ad_accounts: adAccountsResult.success ? adAccountsResult.adAccounts : [],
                 is_active: true,
                 // Preserve existing WhatsApp config if present
                 whatsapp_phone_id: existingConn?.whatsapp_phone_id || null,
@@ -298,7 +298,6 @@ router.post('/connect-api-key', async (req, res) => {
             message: 'Meta account connected successfully',
             profile: profile.data,
             pages: pagesResult.success ? pagesResult.pages : [],
-            adAccounts: adAccountsResult.success ? adAccountsResult.adAccounts : [],
             expiresAt: validation.expiresAt
         });
 
@@ -427,7 +426,6 @@ router.get('/connection', async (req, res) => {
                     pageId: p.id,
                     pageName: p.name
                 })),
-            adAccounts: connection.ad_accounts || [],
             connectionType: connection.connection_type,
             whatsappPhoneId: connection.whatsapp_phone_id || '',
             wabaId: connection.waba_id || ''
@@ -476,7 +474,6 @@ router.post('/refresh-accounts', async (req, res) => {
         const { connection, metaService } = ctx;
 
         const pagesResult = await metaService.getPages();
-        const adAccountsResult = await metaService.getAdAccounts();
 
         const freshPages = pagesResult.success ? pagesResult.pages : connection.pages;
 
@@ -490,7 +487,6 @@ router.post('/refresh-accounts', async (req, res) => {
             .from('meta_connections')
             .update({
                 pages: freshPages,
-                ad_accounts: adAccountsResult.success ? adAccountsResult.adAccounts : connection.ad_accounts,
                 selected_page_ids: prunedSelection,
                 updated_at: new Date().toISOString()
             })
@@ -500,8 +496,7 @@ router.post('/refresh-accounts', async (req, res) => {
 
         res.json({
             success: true,
-            pages: pagesResult.success ? pagesResult.pages : [],
-            adAccounts: adAccountsResult.success ? adAccountsResult.adAccounts : []
+            pages: pagesResult.success ? pagesResult.pages : []
         });
 
     } catch (error) {
@@ -864,24 +859,150 @@ router.get('/posts/scheduled', async (req, res) => {
 });
 
 /**
- * Cancel/Delete a scheduled post
+ * Cancel a scheduled post, or delete one that already went live.
  * DELETE /api/meta/posts/:id
+ *
+ * A pending/failed/cancelled post exists only in our table, so removing the
+ * row is the whole job. A published one is live on Meta, and deleting only our
+ * row would leave it up while telling the user it was gone — so we call Graph
+ * first and report per platform.
+ *
+ * Instagram is the exception: the Graph API has no delete for media, so an IG
+ * post can never be removed from here. We say so rather than implying success.
  */
 router.delete('/posts/:id', async (req, res) => {
     try {
         const userId = req.user.id;
         const { id } = req.params;
 
-        const { error } = await supabase
+        const { data: post, error: fetchError } = await supabase
             .from('scheduled_posts')
-            .delete()
+            .select('*')
             .eq('id', id)
             .eq('user_id', userId)
-            .eq('status', 'pending'); // Can only delete pending posts
+            .single();
 
-        if (error) throw error;
+        if (fetchError || !post) {
+            return res.status(404).json({ error: 'Post not found' });
+        }
 
-        res.json({ success: true, message: 'Scheduled post deleted' });
+        // The scheduler owns this row for the length of one publish attempt.
+        // Deleting it now would orphan whatever Meta is midway through accepting.
+        if (post.status === 'processing') {
+            return res.status(409).json({
+                error: 'This post is being published right now. Try again in a moment.'
+            });
+        }
+
+        // Drops the row only if its status has not changed since we read it —
+        // otherwise the scheduler picked it up in between and we must not
+        // report a deletion that did not happen.
+        const dropRow = async () => {
+            const { data: deleted, error } = await supabase
+                .from('scheduled_posts')
+                .delete()
+                .eq('id', id)
+                .eq('user_id', userId)
+                .eq('status', post.status)
+                .select('id');
+            if (error) throw error;
+            return deleted?.length > 0;
+        };
+
+        // Nothing is live on Meta — the row is the entire post.
+        if (post.status !== 'published') {
+            if (!await dropRow()) {
+                return res.status(409).json({
+                    error: 'This post changed while you were deleting it. Reload and try again.'
+                });
+            }
+            return res.json({
+                success: true,
+                removedFromMeta: [],
+                message: 'Scheduled post cancelled'
+            });
+        }
+
+        // Published: find what actually reached each platform.
+        const results = post.publish_results || {};
+        const live = Object.entries(results)
+            .filter(([, r]) => r?.success && r.postId && !r.deleted);
+
+        if (live.length === 0) {
+            // Recorded as published but nothing traceable to delete — most
+            // likely an older row from before publish_results was stored.
+            if (!await dropRow()) {
+                return res.status(409).json({
+                    error: 'This post changed while you were deleting it. Reload and try again.'
+                });
+            }
+            return res.json({
+                success: true,
+                removedFromMeta: [],
+                message: 'Removed from history. No Meta post id was recorded, so nothing was deleted on Meta.'
+            });
+        }
+
+        const ctx = await loadConnection(req, res);
+        if (!ctx) return;
+
+        const tokenResult = await ctx.metaService.getPageToken(post.page_id);
+        if (!tokenResult.success) {
+            return handleMetaError(res, userId, tokenResult);
+        }
+        const { pageAccessToken } = tokenResult;
+
+        const removedFromMeta = [];
+        const remaining = [];
+        const nextResults = { ...results };
+
+        for (const [platform, result] of live) {
+            if (platform === 'instagram') {
+                remaining.push({
+                    platform,
+                    reason: 'The Meta Graph API has no endpoint for deleting Instagram media. Delete this post in the Instagram app.'
+                });
+                continue;
+            }
+
+            const deletion = await ctx.metaService.deletePost(result.postId, pageAccessToken);
+
+            if (deletion.success) {
+                removedFromMeta.push(platform);
+                nextResults[platform] = { ...result, deleted: true, deletedAt: new Date().toISOString() };
+            } else {
+                remaining.push({ platform, reason: deletion.error });
+            }
+        }
+
+        // Everything that was live is gone — the history row can go too.
+        if (remaining.length === 0) {
+            if (!await dropRow()) {
+                return res.status(409).json({
+                    error: 'This post changed while you were deleting it. Reload and try again.'
+                });
+            }
+            return res.json({
+                success: true,
+                removedFromMeta,
+                message: `Deleted from ${removedFromMeta.join(' and ')}`
+            });
+        }
+
+        // Something is still up on Meta. Keep the row so history stays honest,
+        // but record the parts we did manage to delete.
+        await supabase
+            .from('scheduled_posts')
+            .update({ publish_results: nextResults, updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .eq('user_id', userId);
+
+        return res.status(409).json({
+            success: false,
+            removedFromMeta,
+            remaining,
+            error: remaining.map((r) => r.reason).join(' ')
+        });
 
     } catch (error) {
         console.error('Delete post error:', error);
@@ -954,138 +1075,6 @@ router.get('/posts/metrics', async (req, res) => {
 
     } catch (error) {
         console.error('Post metrics error:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ==================== CAMPAIGN ROUTES ====================
-
-/**
- * Get campaigns with insights
- * GET /api/meta/campaigns
- */
-router.get('/campaigns', async (req, res) => {
-    try {
-        const { adAccountId, datePreset = 'last_30d' } = req.query;
-
-        const ctx = await loadConnection(req, res);
-        if (!ctx) return;
-
-        const { connection, metaService } = ctx;
-
-        const targetAdAccountId = adAccountId ||
-            (connection.ad_accounts && connection.ad_accounts[0]?.account_id);
-
-        if (!targetAdAccountId) {
-            return res.json({ success: true, campaigns: [], message: 'No ad accounts found' });
-        }
-
-        const campaignsResult = await metaService.getCampaigns(targetAdAccountId);
-
-        if (!campaignsResult.success) {
-            return handleMetaError(res, req.user.id, campaignsResult);
-        }
-
-        const campaignsWithInsights = await Promise.all(
-            (campaignsResult.data.data || []).map(async (campaign) => {
-                const insightsResult = await metaService.getCampaignInsights(campaign.id, datePreset);
-                return {
-                    ...campaign,
-                    insights: insightsResult.success ? (insightsResult.data.data?.[0] || {}) : {}
-                };
-            })
-        );
-
-        res.json({
-            success: true,
-            campaigns: campaignsWithInsights,
-            adAccountId: targetAdAccountId
-        });
-
-    } catch (error) {
-        console.error('Get campaigns error:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-/**
- * Get aggregated ad account insights
- * GET /api/meta/insights
- */
-router.get('/insights', async (req, res) => {
-    try {
-        const { adAccountId, datePreset = 'last_30d' } = req.query;
-
-        const ctx = await loadConnection(req, res);
-        if (!ctx) return;
-
-        const { connection, metaService } = ctx;
-
-        const targetAdAccountId = adAccountId ||
-            (connection.ad_accounts && connection.ad_accounts[0]?.account_id);
-
-        if (!targetAdAccountId) {
-            return res.json({ success: true, insights: {}, message: 'No ad accounts found' });
-        }
-
-        const insightsResult = await metaService.getAdAccountInsights(targetAdAccountId, datePreset);
-
-        if (!insightsResult.success) {
-            return handleMetaError(res, req.user.id, insightsResult);
-        }
-
-        res.json({
-            success: true,
-            insights: insightsResult.data.data?.[0] || {},
-            adAccountId: targetAdAccountId
-        });
-
-    } catch (error) {
-        console.error('Get insights error:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-/**
- * Get live ad account balance & spend
- * GET /api/meta/account-balance
- */
-router.get('/account-balance', async (req, res) => {
-    try {
-        const ctx = await loadConnection(req, res);
-        if (!ctx) return;
-
-        const adAccountsResult = await ctx.metaService.getAdAccounts();
-
-        if (!adAccountsResult.success) {
-            return handleMetaError(res, req.user.id, adAccountsResult);
-        }
-
-        const accounts = adAccountsResult.adAccounts || [];
-
-        if (accounts.length === 0) {
-            return res.json({ success: true, accounts: [], message: 'No ad accounts found' });
-        }
-
-        // Meta returns amounts in the account currency's minor units (cents)
-        const formattedAccounts = accounts.map((acc) => ({
-            account_id: acc.account_id,
-            name: acc.name,
-            currency: acc.currency || 'USD',
-            account_status: acc.account_status, // 1=Active, 2=Disabled, 3=Unsettled, etc.
-            balance: acc.balance ? (parseFloat(acc.balance) / 100).toFixed(2) : '0.00',
-            amount_spent: acc.amount_spent ? (parseFloat(acc.amount_spent) / 100).toFixed(2) : '0.00',
-        }));
-
-        await supabase
-            .from('meta_connections')
-            .update({ ad_accounts: accounts, updated_at: new Date().toISOString() })
-            .eq('user_id', req.user.id);
-
-        res.json({ success: true, accounts: formattedAccounts });
-
-    } catch (error) {
-        console.error('Get account balance error:', error);
         res.status(500).json({ error: error.message });
     }
 });

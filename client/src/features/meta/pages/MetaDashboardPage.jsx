@@ -55,7 +55,7 @@ import API_BASE_URL from '@/shared/config';
 
 import DashboardSidebar, { DashboardMobileNav } from '@/features/meta/components/DashboardSidebar';
 
-const MetaAdsPage = () => {
+const MetaDashboardPage = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const { user } = useAuth();
@@ -91,21 +91,8 @@ const MetaAdsPage = () => {
 
 
 
-    const handleViewDetails = (campaign) => {
-        setSelectedCampaign(campaign);
-        setShowDetailsModal(true);
-    };
-
-    const handleViewAnalytics = (campaign) => {
-        setSelectedCampaign(campaign);
-        setShowAnalyticsModal(true);
-    };
-
     // Schedule Wizard State
     const [scheduleStep, setScheduleStep] = useState(1);
-    const [uploadMode, setUploadMode] = useState('file'); // 'file', 'url', or 'library'
-    const [generatedGraphics, setGeneratedGraphics] = useState([]);
-    const [loadingGraphics, setLoadingGraphics] = useState(false);
     const [scheduleFormData, setScheduleFormData] = useState({
         pageId: '',
         platforms: ['facebook'],
@@ -121,36 +108,6 @@ const MetaAdsPage = () => {
     // Helper to update form
     const updateScheduleForm = (updates) => setScheduleFormData(prev => ({ ...prev, ...updates }));
 
-    // Fetch generated graphics from library
-    const loadGeneratedGraphics = async () => {
-        setLoadingGraphics(true);
-        try {
-            const response = await fetch(`${API_BASE_URL}/api/design/jobs`, {
-                headers: getAuthHeaders()
-            });
-            const data = await response.json();
-            if (data.success) {
-                // Filter only completed jobs with flyer_url
-                const completedJobs = (data.jobs || []).filter(job => job.status === 'completed' && job.flyer_url);
-                setGeneratedGraphics(completedJobs);
-            }
-        } catch (error) {
-            console.error('Failed to load graphics:', error);
-        } finally {
-            setLoadingGraphics(false);
-        }
-    };
-
-    // Add graphic from library to media
-    const selectGraphicFromLibrary = (job) => {
-        const url = job.flyer_url;
-        if (!scheduleFormData.mediaUrls.includes(url)) {
-            updateScheduleForm({ mediaUrls: [...scheduleFormData.mediaUrls, url] });
-            toast.success('Graphic added!');
-        } else {
-            toast.info('Already added');
-        }
-    };
     // Listen for auth state changes (handles both initial load and OAuth redirects)
     useEffect(() => {
         // Reset the processed flag on mount
@@ -398,14 +355,17 @@ const MetaAdsPage = () => {
                 headers: getAuthHeaders()
             });
 
-            if (response.ok) {
-                toast.success('Meta account disconnected');
-                setIsConnected(false);
-                setConnection(null);
-                setCampaigns([]);
-                setScheduledPosts([]);
-                setInsights({});
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                toast.error(data.error || 'Failed to disconnect');
+                return;
             }
+
+            toast.success('Meta account disconnected');
+            setIsConnected(false);
+            setConnection(null);
+            setScheduledPosts([]);
         } catch (error) {
             toast.error('Failed to disconnect');
         }
@@ -452,7 +412,7 @@ const MetaAdsPage = () => {
             let finalMediaUrls = scheduleFormData.mediaUrls.filter(url => url.trim() !== '' && !url.startsWith('blob:'));
 
             // Handle File Uploads
-            if (scheduleFormData.mediaFiles.length > 0 && uploadMode === 'file') {
+            if (scheduleFormData.mediaFiles.length > 0) {
                 const toastId = toast.loading('Uploading media...');
 
                 const formData = new FormData();
@@ -532,7 +492,6 @@ const MetaAdsPage = () => {
                     scheduledTime: '',
                     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                 });
-                setUploadMode('file');
                 await loadScheduledPosts();
             } else {
                 toast.error(data.error || 'Failed to schedule post');
@@ -568,15 +527,30 @@ const MetaAdsPage = () => {
         }
     };
 
-    const handleDeleteScheduledPost = async (postId) => {
-        if (!confirm('Delete this scheduled post?')) return;
+    const handleDeleteScheduledPost = async (post) => {
+        // A published post is live on Meta; a pending one only exists here.
+        const isPublished = post?.status === 'published';
+        const confirmText = isPublished
+            ? 'Delete this post from Facebook? This cannot be undone.'
+            : 'Cancel this scheduled post?';
+        if (!confirm(confirmText)) return;
 
         try {
-            await fetch(`${API_BASE_URL}/api/meta/posts/${postId}`, {
+            const response = await fetch(`${API_BASE_URL}/api/meta/posts/${post.id}`, {
                 method: 'DELETE',
                 headers: getAuthHeaders()
             });
-            toast.success('Post deleted');
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                // 409 carries the parts that could not be deleted — most often
+                // Instagram, which the Graph API cannot delete at all.
+                toast.error(data.error || 'Failed to delete post');
+                await loadScheduledPosts();
+                return;
+            }
+
+            toast.success(data.message || 'Post deleted');
             await loadScheduledPosts();
         } catch (error) {
             toast.error('Failed to delete post');
@@ -692,9 +666,12 @@ const MetaAdsPage = () => {
                                             <span className={`px-3 py-1 rounded-full text-xs font-medium ${statusConfig.bg} ${statusConfig.color}`}>
                                                 {statusConfig.label}
                                             </span>
-                                            {post.status === 'pending' && (
+                                            {['pending', 'published', 'failed'].includes(post.status) && (
                                                 <button
-                                                    onClick={() => handleDeleteScheduledPost(post.id)}
+                                                    onClick={() => handleDeleteScheduledPost(post)}
+                                                    title={post.status === 'published'
+                                                        ? 'Delete this post from Facebook'
+                                                        : 'Remove from history'}
                                                     className="p-2 rounded-lg hover:bg-red-100 text-red-500 transition-colors"
                                                 >
                                                     <X className="h-4 w-4" />
@@ -923,8 +900,6 @@ const MetaAdsPage = () => {
                         onContentChange={(content) => updateScheduleForm({ content })}
                         onLinkChange={(linkUrl) => updateScheduleForm({ linkUrl })}
                         onMediaUpdate={(updates) => updateScheduleForm(updates)}
-                        getAuthHeaders={getAuthHeaders}
-                        apiBase={API_BASE_URL}
                     />
                 )}
 
@@ -946,4 +921,4 @@ const MetaAdsPage = () => {
     );
 };
 
-export default MetaAdsPage;
+export default MetaDashboardPage;

@@ -1,4 +1,4 @@
-export { default as MetaAdsPage } from '@/features/meta/pages/MetaAdsPage';
+export { default as MetaDashboardPage } from '@/features/meta/pages/MetaDashboardPage';
 export { default as AnalyticsPanel } from '@/features/meta/components/AnalyticsPanel';
 export { default as CreatePostHub } from '@/features/meta/components/CreatePostHub';
 export { default as DashboardSidebar } from '@/features/meta/components/DashboardSidebar';

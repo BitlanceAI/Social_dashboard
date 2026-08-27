@@ -14,8 +14,6 @@ const StepContent = ({
     onContentChange,
     onLinkChange,
     onMediaUpdate,
-    getAuthHeaders,
-    apiBase
 }) => {
     return (
         <div className="space-y-6">
@@ -48,8 +46,6 @@ const StepContent = ({
                         mediaUrls={mediaUrls}
                         mediaFiles={mediaFiles}
                         onUpdate={onMediaUpdate}
-                        getAuthHeaders={getAuthHeaders}
-                        apiBase={apiBase}
                     />
 
                     {/* Link URL */}

@@ -3,67 +3,98 @@
 ## Critical Rules (Read First)
 
 1. **Server uses ES Modules** — all `require()` calls are invalid; use `import`/`export` syntax only.
-2. **TLS workaround is intentional** — `NODE_TLS_REJECT_UNAUTHORIZED='0'` in dev is a known tradeoff, not a bug to fix. Do NOT remove unless fixing the underlying certificate issue.
-3. **CORS is locked to an explicit allowlist** — to allow a new origin, add it to `allowedOrigins` in `server/src/index.js`, never open it with `'*'`.
-4. **PII must be SHA-256 hashed before leaving the server** — email/phone sent to Meta CAPI must pass through `trackingController` hashing logic.
-5. **Supabase service-role key is server-side only** — never expose `SUPABASE_SERVICE_ROLE_KEY` to the client.
-6. **Route registration order matters** — `articleRoutes` and `retellRoutes` are mounted at `/api` root; add new routes before them to avoid path conflicts.
+2. **`server/src/config/env.js` is the process bootstrap** — it owns `dotenv.config()`, the IPv4 DNS order, and the TLS flag. Any module reading `process.env` at module scope must `import` it first. Never re-add a stray `dotenv.config()` elsewhere.
+3. **TLS workaround is intentional** — `NODE_TLS_REJECT_UNAUTHORIZED='0'` in dev is a known tradeoff, not a bug to fix. Do NOT remove unless fixing the underlying certificate issue.
+4. **CORS is locked to an explicit allowlist** — to allow a new origin, add it to `allowedOrigins` in `server/src/config/env.js` (or the `ALLOWED_ORIGINS` env var), never open it with `'*'`.
+5. **Supabase service-role key is server-side only** — never expose `SUPABASE_SERVICE_ROLE_KEY` to the client. The client uses `VITE_SUPABASE_ANON_KEY` only.
+6. **Client imports use the `@/` alias, never deep relatives** — `@/features/meta/...`, `@/shared/lib/...`. This is what keeps files cheap to move.
+7. **Cross-feature imports go through the feature barrel** — `import { AuthGuard } from '@/features/auth'`, not through its internal path. Anything shared by two features belongs in `shared/`.
 
 ---
 
 ## Key Commands
 
 ```bash
-# Development
-cd client && npm run dev        # Vite frontend on http://localhost:5173
-cd server && npm run dev        # Express backend on http://localhost:3001 (node --watch)
+# Development — npm workspaces; run from the repo root
+npm install                     # installs client + server
+npm run dev                     # client (5173) + server (3001) concurrently
+
+# Or individually
+npm run dev -w client
+npm run dev -w server
 
 # Production
-npm start                       # Starts server only (node server/src/index.js)
-npm run build                   # Installs all deps + builds client for deployment
+npm start                       # server only (node src/server.js)
+npm run build                   # installs deps + builds the client for deployment
 
 # Client only
-cd client && npm run lint       # ESLint
-cd client && npm run build      # Vite production build
-cd client && npm run preview    # Preview production build locally
+npm run lint -w client
+npm run build -w client
 ```
 
 ---
 
 ## Architecture
 
-Full-stack Meta Ads automation platform. See `ARCHITECTURE.md` for full diagrams.
+Full-stack Meta (Facebook Pages + Instagram) automation platform.
+
+### Client — feature-sliced
 
 ```
-client/           React 19 + Vite — frontend SPA
-  src/
-    components/   Navbar, Footer, AuthGuard, AdminGuard, CampaignForms
-    context/      AuthContext, ThemeContext
-    pages/        Public + protected pages, landing pages (/l/*)
-    services/api.js  Axios API client (base URL from VITE_API_URL)
-    utils/MetaPixel.js  Browser-side pixel tracking helper
+client/src/
+  app/                    application shell; nothing business-specific
+    main.jsx              DOM entry (referenced by index.html)
+    App.jsx               providers + <Routes> loop
+    routes.jsx            the route table — a new page adds one entry here
+    providers/            AppProviders.jsx — every app-wide context
+  features/               one folder per product area, self-contained
+    auth/                 components/ context/ pages/ index.js
+    meta/                 components/ (+ steps/) pages/ index.js
+    notifications/        components/ lib/ index.js
+    legal/                components/ pages/ index.js
+    marketing/            pages/
+  shared/                 used by 2+ features; never imports from features/
+    components/layout/    Logo, SEOHead
+    components/ui/        shadcn primitives
+    context/              ThemeContext
+    lib/                  analytics, supabase, utils
+    config/               API_BASE_URL
+  styles/                 index.css, App.css
+```
 
+**Adding a feature:** create `features/<name>/` with `components/`, `pages/`, `index.js`;
+add its routes to `app/routes.jsx`. Nothing else in `app/` or `shared/` changes.
+
+### Server — modular
+
+```
 server/src/
-  index.js        Express entry — CORS, route mounting
-  config/         supabaseClient.js
-  controllers/    campaignController, trackingController, articleController…
-  routes/         One file per domain (auth, campaigns, meta, tracking, …)
-  services/       social/metaService (Graph API), scheduler (post + blog cron), analytics
-  middleware/     authMiddleware.js (Bearer token validation)
-  utils/          encryption.js
+  server.js               process entry: env bootstrap -> listen -> scheduler
+  app.js                  express assembly, exported without listening (testable)
+  config/
+    env.js                dotenv + DNS + TLS + CORS allowlist  (import first!)
+    supabase.js           supabase + supabaseAdmin clients
+  middleware/auth.js      Bearer token validation
+  modules/                one folder per domain, routes + controller + service
+    auth/                 auth.routes.js  auth.controller.js
+    profile/              profile.routes.js  profile.controller.js
+    meta/                 meta.routes.js  meta.service.js
+    push/                 push.routes.js  push.service.js
+    scheduler/            scheduler.service.js
+  shared/utils/           encryption.js
+secrets/                  gitignored credential drop (templates tracked)
 ```
+
+**Adding a module:** create `modules/<name>/<name>.routes.js` (+ `.controller.js`,
+`.service.js`), then mount it in `app.js`. Keep prefixed mounts above any `/api` root mount.
 
 ### External Integrations
 
 | Service | Purpose |
 |---------|---------|
 | Supabase | PostgreSQL DB + Storage + Auth |
-| Meta Graph API v21 | Campaigns, Pages, Instagram publishing, OAuth, CAPI |
-| Google Sheets API | Lead data sync |
-| Retell AI | Voice agent calls |
-| Firebase | Push notifications |
-| Gemini AI / OpenAI | Content generation |
-| Twilio | SMS |
+| Meta Graph API v21 | Pages, Instagram publishing, OAuth, post engagement counts |
+| Firebase (FCM) | Web push notifications |
 
 ---
 
@@ -76,61 +107,54 @@ SUPABASE_SERVICE_ROLE_KEY=   # Server-side ONLY
 META_APP_ID=
 META_APP_SECRET=
 META_REDIRECT_URI=
-META_PIXEL_ID=916142120954550
-META_ACCESS_TOKEN=            # For CAPI
+META_RETURN_PATH=             # client route the OAuth callback bounces back to
+FRONTEND_URL=
 ENCRYPTION_KEY=
 PORT=3001
 ALLOWED_ORIGINS=              # Comma-separated, overrides hardcoded list
 INSECURE_TLS=true             # Dev only — disable in production
 ```
 
-### Client (`client/.env`)
+### Client (`client/.env`) — see `client/.env.example`
 ```
-VITE_API_URL=http://localhost:3001
+VITE_API_BASE_URL=http://localhost:3001
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=       # public anon key only
+VITE_FIREBASE_*=              # optional; web push opt-in hides itself without them
 ```
 
 ---
 
-## Database — Campaign Tables
+## Database — Supabase Tables
 
-9 campaign types each have their own Supabase table:
-`awareness_campaigns`, `traffic_campaigns`, `engagement_campaigns`,
-`leadgen_campaigns`, `conversion_campaigns`, `app_promotion_campaigns`,
-`local_business_campaigns`, `remarketing_campaigns`, `offer_event_campaigns`
+`users`, `meta_connections`, `scheduled_posts`, `push_tokens`
 
-Other tables: `users`, `tracking_events`, `articles`, `credit_ledger`, `meta_connections`
+Migrations live in the repo-root `supabase/migrations/` (single CLI project).
 
 ---
 
 ## API Route Map
 
-| Prefix | File | Notes |
-|--------|------|-------|
-| `/api/auth` | authRoutes.js | Login, signup, logout |
-| `/api/campaigns` | campaignRoutes.js | CRUD + `/upload` for media |
-| `/api/track` | trackingRoutes.js | CAPI relay — hashes PII |
-| `/api/meta` | social/metaRoutes.js | OAuth, Pages, FB + Instagram publishing, scheduling, Insights |
-| `/api/credits` | creditRoutes.js | Credit balance |
-| `/api/design` | designRoutes.js | AI graphic generation |
-| `/api/admin` | adminRoutes.js | Admin ops |
-| `/api/admin/auto-blog` | autoBlogRoutes.js | Automated blog generation |
-| `/api/google-sheets` | googleSheetsRoutes.js | Lead sync |
-| `/api/meetings` | meetingRoutes.js | Calendar / Calendly |
-| `/api/gemini` | geminiRoutes.js | Gemini AI |
-| `/api/twitter` | twitterRoutes.js | Twitter integration |
-| `/api/linkedin` | linkedinRoutes.js | LinkedIn integration |
-| `/api` (root) | retellRoutes.js | Retell voice (`/api/create-web-call` etc.) |
-| `/api` (root) | articleRoutes.js | Blog CRUD + public `/api/public/articles` |
-| `/webhooks/meta` | webhookRoutes.js | Meta lead/conversion webhooks |
+| Prefix | Module | Notes |
+|--------|--------|-------|
+| `/api/auth` | `modules/auth` | Login, signup, logout |
+| `/api/profiles` | `modules/profile` | User profile CRUD |
+| `/api/meta` | `modules/meta` | OAuth, Pages, FB + Instagram publishing, scheduling, Insights |
+| `/api/push` | `modules/push` | FCM web-push token registration |
+| `/health` | `app.js` | Liveness probe |
+
+All mounted in `server/src/app.js`.
 
 ---
 
 ## Reminders
 
-- **DNS is forced to IPv4** (`dns.setDefaultResultOrder('ipv4first')`) to prevent Supabase timeouts — do not remove.
+- **Ads are out of scope.** Campaigns, ad insights, account balance and the Conversions API were removed from `modules/meta`, and `ads_read` / `ads_management` are deliberately absent from `MetaService.DEFAULT_SCOPES`. Do not re-add ads endpoints without also adding the scopes and getting them through Meta App Review.
+
+- **DNS is forced to IPv4** (`dns.setDefaultResultOrder('ipv4first')` in `config/env.js`) to prevent Supabase timeouts — do not remove.
 - **`INSECURE_TLS` only disables TLS in non-production** — the check is `NODE_ENV !== 'production'`.
 - Deployment: client → Vercel (`automation-dashboard-*.vercel.app`), server → separate Node host.
-- Media uploads go to Supabase Storage bucket `campaign-media`; social media assets to `post-media`.
+- Post media uploads go to the Supabase Storage bucket `post-media`.
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph

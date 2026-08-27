@@ -1,10 +1,11 @@
 /**
  * Meta Graph API Service
  *
- * Official Meta Graph API + Marketing API client. Covers Facebook Page
- * publishing, Instagram Content Publishing, ad campaigns/insights and the
- * Conversions API. Every request goes to graph.facebook.com — there is no
- * third-party relay in this path.
+ * Official Meta Graph API client. Covers Facebook Page publishing and
+ * Instagram Content Publishing. Every request goes to graph.facebook.com —
+ * there is no third-party relay in this path.
+ *
+ * Ads and the Conversions API are out of scope — see DEFAULT_SCOPES.
  */
 
 // Process-wide env bootstrap — these module-scope reads need it loaded.
@@ -91,20 +92,6 @@ class MetaService {
 
         if (result.success && result.data.data) {
             return { success: true, pages: result.data.data };
-        }
-        return result;
-    }
-
-    /**
-     * Get user's Ad Accounts
-     */
-    async getAdAccounts() {
-        const result = await this.request('GET', '/me/adaccounts', {}, {
-            fields: 'id,account_id,name,account_status,currency,amount_spent,balance'
-        });
-
-        if (result.success && result.data.data) {
-            return { success: true, adAccounts: result.data.data };
         }
         return result;
     }
@@ -199,6 +186,20 @@ class MetaService {
         const postData = { message };
         if (link) postData.link = link;
         return service.request('POST', `/${pageId}/feed`, postData);
+    }
+
+    /**
+     * Delete a published Facebook Page post.
+     *
+     * Covered by pages_manage_posts. Works for both feed posts and the photo
+     * nodes that single-image publishes return.
+     *
+     * Instagram has no counterpart — the Graph API exposes no delete for
+     * media, so IG posts can only be removed in the Instagram app.
+     */
+    async deletePost(postId, pageAccessToken) {
+        const service = new MetaService(pageAccessToken || this.accessToken);
+        return service.request('DELETE', `/${postId}`);
     }
 
     /**
@@ -438,81 +439,6 @@ class MetaService {
         return service.request('GET', `/${igUserId}/content_publishing_limit`, {}, {
             fields: 'config,quota_usage'
         });
-    }
-
-    // ==================== CAMPAIGN METHODS ====================
-
-    /**
-     * Get campaigns for an ad account
-     */
-    async getCampaigns(adAccountId) {
-        return this.request('GET', `/act_${adAccountId}/campaigns`, {}, {
-            fields: 'id,name,status,objective,created_time,updated_time,daily_budget,lifetime_budget,budget_remaining',
-            limit: 50
-        });
-    }
-
-    /**
-     * Get campaign insights
-     */
-    async getCampaignInsights(campaignId, datePreset = 'last_30d') {
-        return this.request('GET', `/${campaignId}/insights`, {}, {
-            fields: 'impressions,clicks,spend,reach,cpc,ctr,conversions,cost_per_conversion',
-            date_preset: datePreset
-        });
-    }
-
-    /**
-     * Get ad account insights (aggregated)
-     */
-    async getAdAccountInsights(adAccountId, datePreset = 'last_30d') {
-        return this.request('GET', `/act_${adAccountId}/insights`, {}, {
-            fields: 'impressions,clicks,spend,reach,cpc,ctr,conversions,cost_per_conversion',
-            date_preset: datePreset
-        });
-    }
-
-    /**
-     * Create a campaign
-     */
-    async createCampaign(adAccountId, { name, objective, status = 'ACTIVE', dailyBudget }) {
-        const campaignData = {
-            name,
-            objective, // OUTCOME_TRAFFIC, OUTCOME_ENGAGEMENT, OUTCOME_LEADS, etc.
-            status,
-            special_ad_categories: [], // Required field
-        };
-
-        if (dailyBudget) {
-            campaignData.daily_budget = dailyBudget;
-            campaignData.bid_strategy = 'LOWEST_COST_WITHOUT_CAP';
-        }
-
-        return this.request('POST', `/act_${adAccountId}/campaigns`, campaignData);
-    }
-
-    async updateCampaignStatus(campaignId, status) {
-        return this.request('POST', `/${campaignId}`, { status });
-    }
-
-    // ==================== CONVERSION API METHODS ====================
-
-    /**
-     * Send Event to Meta Conversion API
-     * @param {string} pixelId - The Meta Pixel ID
-     * @param {Array} events - Array of event objects
-     * @param {string|null} testCode - Optional test code for Graph API Test Tool
-     */
-    async sendConversionEvent(pixelId, events, testCode = null) {
-        const payload = { data: events };
-
-        if (testCode) {
-            payload.test_event_code = testCode;
-        }
-
-        console.log(`Sending ${events.length} events to CAPI (Pixel: ${pixelId})`);
-
-        return this.request('POST', `/${pixelId}/events`, payload);
     }
 
     // ==================== UTILITY METHODS ====================
