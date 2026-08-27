@@ -1,4 +1,5 @@
 import React from 'react';
+import { BODY, CARD, CARD_TITLE, LIST } from './LegalLayout';
 
 /**
  * Data deletion instructions.
@@ -10,31 +11,29 @@ import React from 'react';
  * Radius scale matches the landing page: rounded-xl small, rounded-2xl cards.
  */
 
-const CARD = 'rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 sm:p-8';
-
 const DataDeletionSteps = () => (
-    <div className="space-y-6">
+    <>
         <div className={CARD}>
-            <h2 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight mb-4">
+            <h2 className={CARD_TITLE}>
                 What we store
             </h2>
-            <ul className="space-y-2 text-[var(--muted)] text-sm leading-relaxed list-disc pl-5">
+            <ul className={LIST}>
                 <li>Your encrypted Meta access token</li>
                 <li>Your app-scoped Meta user ID</li>
                 <li>The list of Facebook Pages and linked Instagram Business accounts</li>
                 <li>The posts you have composed and scheduled</li>
             </ul>
-            <p className="text-[var(--muted)] text-sm leading-relaxed mt-4">
+            <p className={`${BODY} mt-4`}>
                 We do not store your Facebook or Instagram password, your direct
                 messages, or your comments.
             </p>
         </div>
 
         <div className={CARD}>
-            <h2 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight mb-2">
+            <h2 className={`${CARD_TITLE} mb-2`}>
                 How to delete it
             </h2>
-            <p className="text-[var(--muted)] text-sm leading-relaxed mb-6">
+            <p className={`${BODY} mb-6`}>
                 Any one of these removes your data. Choose whichever is easiest.
             </p>
             <ol className="space-y-4">
@@ -63,10 +62,10 @@ const DataDeletionSteps = () => (
                         <>
                             Write to{' '}
                             <a
-                                href="mailto:support@bitlancetechhub.com"
+                                href="mailto:bitlancetechhub@gmail.com"
                                 className="text-[var(--accent)] hover:underline"
                             >
-                                support@bitlancetechhub.com
+                                bitlancetechhub@gmail.com
                             </a>{' '}
                             from the address on your account. We action requests within 30 days.
                         </>,
@@ -79,7 +78,7 @@ const DataDeletionSteps = () => (
                         <span className="w-8 h-8 rounded-full bg-[var(--accent-muted)] text-[var(--accent)] font-mono text-[10px] flex items-center justify-center shrink-0">
                             {num}
                         </span>
-                        <span className="text-[var(--muted)] text-sm leading-relaxed">
+                        <span className={BODY}>
                             <strong className="text-[var(--text)]">{label}</strong> {body}
                         </span>
                     </li>
@@ -88,10 +87,10 @@ const DataDeletionSteps = () => (
         </div>
 
         <div className={CARD}>
-            <h2 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight mb-4">
+            <h2 className={CARD_TITLE}>
                 What gets deleted
             </h2>
-            <p className="text-[var(--muted)] text-sm leading-relaxed">
+            <p className={BODY}>
                 Your Meta access token, your Meta connection record, and every post you
                 scheduled through this app. Posts that have already been published to
                 Facebook or Instagram remain on those platforms &mdash; delete them there
@@ -99,7 +98,7 @@ const DataDeletionSteps = () => (
                 Meta owns it.
             </p>
         </div>
-    </div>
+    </>
 );
 
 export default DataDeletionSteps;
