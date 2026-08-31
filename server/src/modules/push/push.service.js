@@ -96,16 +96,20 @@ const init = () => {
 export const isPushEnabled = () => Boolean(init());
 
 /**
- * Send a notification to every browser a user has opted in from.
- * Resolves quietly when push is not configured or the user has no tokens.
+ * Send a notification to every browser the given users have opted in from.
+ * Resolves quietly when push is not configured or nobody has tokens.
+ *
+ * push_tokens has UNIQUE(token), so a token belongs to exactly one user and a
+ * fan-out over several users can never emit a duplicate.
  */
-export const sendToUser = async (userId, { title, body, url }) => {
+export const sendToUsers = async (userIds, { title, body, url }) => {
     if (!init()) return { sent: 0, skipped: true };
+    if (!userIds || userIds.length === 0) return { sent: 0 };
 
     const { data: rows, error } = await supabase
         .from('push_tokens')
         .select('token')
-        .eq('user_id', userId);
+        .in('user_id', userIds);
 
     if (error) {
         console.error('[Push] Could not read tokens:', error.message);
@@ -150,4 +154,30 @@ export const sendToUser = async (userId, { title, body, url }) => {
     return { sent: response.successCount, failed: response.failureCount };
 };
 
-export default { sendToUser, isPushEnabled };
+/** One user. Kept so existing callers and the /test route need no change. */
+export const sendToUser = (userId, payload) => sendToUsers([userId], payload);
+
+/**
+ * Everyone in a workspace.
+ *
+ * A scheduled post belongs to a workspace, not to whoever happened to create
+ * it, so a publish failure has to reach the people actually watching that
+ * workspace -- not just the one member whose token was used.
+ */
+export const sendToWorkspace = async (workspaceId, payload) => {
+    if (!workspaceId) return { sent: 0 };
+
+    const { data: members, error } = await supabase
+        .from('workspace_members')
+        .select('user_id')
+        .eq('workspace_id', workspaceId);
+
+    if (error) {
+        console.error('[Push] Could not read workspace members:', error.message);
+        return { sent: 0 };
+    }
+
+    return sendToUsers((members || []).map((m) => m.user_id), payload);
+};
+
+export default { sendToUser, sendToUsers, sendToWorkspace, isPushEnabled };

@@ -21,10 +21,30 @@ if (process.env.INSECURE_TLS === 'true' || process.env.NODE_ENV !== 'production'
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 
+const port = Number(process.env.PORT) || 3001;
+
 export const env = {
     nodeEnv: process.env.NODE_ENV ?? 'development',
-    port: Number(process.env.PORT) || 3001,
+    port,
     serveFrontend: process.env.SERVE_FRONTEND === 'true',
+
+    /**
+     * Where this API is reachable from the public internet.
+     *
+     * OAuth providers build their callback from this and require a public
+     * HTTPS URL, so in local development it has to be a tunnel (ngrok,
+     * Cloudflare) rather than localhost. Set PUBLIC_URL once and every
+     * provider's redirect URI follows -- previously each provider carried its
+     * own copy, so a new tunnel URL meant editing several lines and missing
+     * one.
+     *
+     * Only the OAuth callbacks need this. The browser still talks to the API
+     * over localhost.
+     */
+    publicUrl: (process.env.PUBLIC_URL || `http://localhost:${port}`).replace(/\/$/, ''),
+
+    /** Where the browser is running -- the OAuth callback redirects back here. */
+    frontendUrl: (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, ''),
     allowedOrigins: process.env.ALLOWED_ORIGINS
         ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
         : [

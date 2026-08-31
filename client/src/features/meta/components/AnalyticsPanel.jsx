@@ -12,6 +12,7 @@ import {
     ExternalLink,
 } from 'lucide-react';
 import API_BASE_URL from '@/shared/config';
+import { platformMeta } from '@/features/meta/lib/providers';
 
 /**
  * Analytics panel.
@@ -42,7 +43,7 @@ const Stat = ({ icon: Icon, label, value, tone = 'default' }) => {
 
 const num = (v) => (v === null || v === undefined ? '—' : v.toLocaleString());
 
-const AnalyticsPanel = ({ posts = [], authHeaders }) => {
+const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn = false }) => {
     const [rows, setRows] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -63,13 +64,35 @@ const AnalyticsPanel = ({ posts = [], authHeaders }) => {
             setLoading(true);
             setError(null);
             try {
-                const res = await fetch(`${API_BASE_URL}/api/meta/posts/metrics?limit=20`, {
-                    headers: authHeaders()
-                });
-                const data = await res.json();
+                // Each provider reads its own posts. Ask only the ones that are
+                // actually connected, so a LinkedIn-only user does not get a
+                // 404 from the Meta endpoint (and vice versa).
+                const sources = [
+                    hasMeta && '/api/meta/posts/metrics?limit=20',
+                    hasLinkedIn && '/api/linkedin/posts/metrics?limit=20',
+                ].filter(Boolean);
+
+                const responses = await Promise.all(sources.map(async (path) => {
+                    try {
+                        const res = await fetch(`${API_BASE_URL}${path}`, { headers: authHeaders() });
+                        return await res.json();
+                    } catch (e) {
+                        return { success: false, error: e.message };
+                    }
+                }));
+
                 if (cancelled) return;
-                if (data.success) setRows(data.posts || []);
-                else setError(data.error || 'Could not load post metrics');
+
+                const merged = responses.filter((d) => d.success).flatMap((d) => d.posts || []);
+                // One provider failing should not blank the whole tab.
+                const failure = responses.find((d) => !d.success);
+
+                if (merged.length || !failure) {
+                    setRows(merged.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt)));
+                    setError(null);
+                } else {
+                    setError(failure.error || 'Could not load post metrics');
+                }
             } catch (e) {
                 if (!cancelled) setError(e.message);
             } finally {
@@ -78,7 +101,7 @@ const AnalyticsPanel = ({ posts = [], authHeaders }) => {
         })();
 
         return () => { cancelled = true; };
-    }, [published.length]);
+    }, [published.length, hasMeta, hasLinkedIn]);
 
     // Totals across every platform result we managed to read
     const all = (rows || []).flatMap(r => Object.values(r.metrics || {})).filter(m => !m.unavailable);
@@ -152,7 +175,7 @@ const AnalyticsPanel = ({ posts = [], authHeaders }) => {
                                     <tbody>
                                         {rows.flatMap((post, i) =>
                                             Object.entries(post.metrics || {}).map(([platform, m], j) => {
-                                                const Icon = platform === 'instagram' ? Instagram : Facebook;
+                                                const Icon = platformMeta(platform).Icon;
                                                 return (
                                                     <tr key={`${post.id}-${platform}`}
                                                         className={(i + j) > 0 ? 'border-t border-[var(--border)]' : ''}>
@@ -170,7 +193,7 @@ const AnalyticsPanel = ({ posts = [], authHeaders }) => {
                                                         <td className="py-3 px-3">
                                                             <span className="inline-flex items-center gap-1.5 text-[var(--muted)]">
                                                                 <Icon className="h-3.5 w-3.5" />
-                                                                {platform === 'instagram' ? 'Instagram' : 'Facebook'}
+                                                                {platformMeta(platform).label}
                                                             </span>
                                                         </td>
                                                         {m.unavailable ? (

@@ -79,9 +79,11 @@ server/src/
     auth/                 auth.routes.js  auth.controller.js
     profile/              profile.routes.js  profile.controller.js
     meta/                 meta.routes.js  meta.service.js
+    linkedin/             linkedin.routes.js  linkedin.service.js
     push/                 push.routes.js  push.service.js
     scheduler/            scheduler.service.js
   shared/utils/           encryption.js
+  shared/storage/         postMedia.js  (provider-neutral upload helper)
 secrets/                  gitignored credential drop (templates tracked)
 ```
 
@@ -94,6 +96,7 @@ secrets/                  gitignored credential drop (templates tracked)
 |---------|---------|
 | Supabase | PostgreSQL DB + Storage + Auth |
 | Meta Graph API v21 | Pages, Instagram publishing, OAuth, post engagement counts |
+| LinkedIn REST API | Member publishing + OAuth. Org Pages are coded but dormant. |
 | Firebase (FCM) | Web push notifications |
 
 ---
@@ -108,6 +111,12 @@ META_APP_ID=
 META_APP_SECRET=
 META_REDIRECT_URI=
 META_RETURN_PATH=             # client route the OAuth callback bounces back to
+LINKEDIN_CLIENT_ID=
+LINKEDIN_CLIENT_SECRET=
+LINKEDIN_REDIRECT_URI=
+LINKEDIN_API_VERSION=202608   # LinkedIn-Version header; expires yearly
+LINKEDIN_RETURN_PATH=
+LINKEDIN_ORG_SCOPES_ENABLED=false  # flipping this invalidates ALL LinkedIn tokens
 FRONTEND_URL=
 ENCRYPTION_KEY=
 PORT=3001
@@ -127,7 +136,11 @@ VITE_FIREBASE_*=              # optional; web push opt-in hides itself without t
 
 ## Database — Supabase Tables
 
-`users`, `meta_connections`, `scheduled_posts`, `push_tokens`
+`users`, `meta_connections`, `linkedin_connections`, `scheduled_posts`, `push_tokens`
+
+`scheduled_posts.provider` (`'meta' | 'linkedin'`) picks the publisher, and a
+CHECK constraint enforces that exactly the matching connection FK is set. The
+browser has `FOR ALL` RLS on that table, so the constraint is a real guard.
 
 Migrations live in the repo-root `supabase/migrations/` (single CLI project).
 
@@ -139,7 +152,8 @@ Migrations live in the repo-root `supabase/migrations/` (single CLI project).
 |--------|--------|-------|
 | `/api/auth` | `modules/auth` | Login, signup, logout |
 | `/api/profiles` | `modules/profile` | User profile CRUD |
-| `/api/meta` | `modules/meta` | OAuth, Pages, FB + Instagram publishing, scheduling, Insights |
+| `/api/meta` | `modules/meta` | OAuth, Pages, FB + Instagram publishing, scheduling |
+| `/api/linkedin` | `modules/linkedin` | OAuth, member publishing, scheduling, delete, metrics |
 | `/api/push` | `modules/push` | FCM web-push token registration |
 | `/health` | `app.js` | Liveness probe |
 
@@ -148,6 +162,12 @@ All mounted in `server/src/app.js`.
 ---
 
 ## Reminders
+
+- **LinkedIn tokens expire after 60 days and cannot be refreshed.** Refresh tokens go only to approved Marketing Developer Platform partners. `linkedin_connections.token_expires_at` is the single source of truth: the routes precheck it, the scheduler fails a due post with a human message, and the dashboard warns at 7 days. Do not add silent-renewal logic — there is none to add.
+- **`LinkedInService.DEFAULT_SCOPES` must not change casually.** LinkedIn invalidates every previously issued token when an app's requested scope set changes. Turning on `LINKEDIN_ORG_SCOPES_ENABLED` is a forced-reconnect release for all users.
+- **Posting to a LinkedIn Company Page is dormant, not missing.** The code path exists and is exercised by `getOrganizations()`, which returns `[]` without an HTTP call until `rw_organization_admin` is granted. Enabling it needs Community Management API review (legal entity, business email, Page super-admin verification, screencast) — and a rejection cannot be re-applied for with the same app.
+- **`LINKEDIN_API_VERSION` is the only place the `LinkedIn-Version` header lives.** LinkedIn supports a version for a minimum of one year then rejects it outright, so this needs a calendar reminder.
+- **LinkedIn does not fetch media by URL.** Unlike Meta, the server must read the bytes back from the public `post-media` bucket and PUT them to LinkedIn. That is why the bucket stays public.
 
 - **Ads are out of scope.** Campaigns, ad insights, account balance and the Conversions API were removed from `modules/meta`, and `ads_read` / `ads_management` are deliberately absent from `MetaService.DEFAULT_SCOPES`. Do not re-add ads endpoints without also adding the scopes and getting them through Meta App Review.
 

@@ -9,25 +9,18 @@
  */
 
 // Process-wide env bootstrap — these module-scope reads need it loaded.
-import '../../config/env.js';
+import { env } from '../../config/env.js';
 
 import crypto from 'crypto';
 import express from 'express';
-import multer from 'multer';
 import { createClient } from '@supabase/supabase-js';
 import MetaService from './meta.service.js';
 import { authenticateUser } from '../../middleware/auth.js';
+import { resolveWorkspace } from '../../middleware/workspace.js';
 import { encryptData, decryptData } from '../../shared/utils/encryption.js';
+import { uploadPostMedia, postMediaUpload } from '../../shared/storage/postMedia.js';
 
 const router = express.Router();
-
-// Configure Multer for memory storage
-const upload = multer({
-    storage: multer.memoryStorage(),
-    limits: {
-        fileSize: 100 * 1024 * 1024 // 100MB — Instagram video/reels need headroom
-    }
-});
 
 // Initialize Supabase with service role key to bypass RLS
 const supabase = createClient(
@@ -38,8 +31,10 @@ const supabase = createClient(
 // Meta App Config
 const META_APP_ID = process.env.META_APP_ID;
 const META_APP_SECRET = process.env.META_APP_SECRET;
-const META_REDIRECT_URI = process.env.META_REDIRECT_URI || 'http://localhost:3001/api/meta/oauth/callback';
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+// Derived from PUBLIC_URL so a new tunnel URL is a one-line change. An
+// explicit META_REDIRECT_URI still wins, for hosts with a fixed callback.
+const META_REDIRECT_URI = process.env.META_REDIRECT_URI || `${env.publicUrl}/api/meta/oauth/callback`;
+const FRONTEND_URL = env.frontendUrl;
 // Where the OAuth callback bounces the browser back to. Must be a real client
 // route — MetaDashboardPage reads ?oauth_success / ?token / ?error from it.
 const META_RETURN_PATH = process.env.META_RETURN_PATH || '/socialdashboad';
@@ -54,6 +49,15 @@ const PUBLIC_PATHS = ['/oauth/callback', '/deauthorize', '/data-deletion'];
 router.use((req, res, next) => {
     if (PUBLIC_PATHS.includes(req.path)) return next();
     return authenticateUser(req, res, next);
+});
+
+// Everything past the auth guard operates on exactly one workspace.
+// resolveWorkspace verifies membership and replaces the raw x-workspace-id
+// header with a trusted id, falling back to the caller's default workspace so
+// a client that predates this feature keeps working unchanged.
+router.use((req, res, next) => {
+    if (PUBLIC_PATHS.includes(req.path)) return next();
+    return resolveWorkspace(req, res, next);
 });
 
 /**
@@ -101,11 +105,18 @@ const purgeMetaUser = async (metaUserId) => {
 
     if (!connections || connections.length === 0) return 0;
 
-    const userIds = connections.map((c) => c.user_id);
+    const connectionIds = connections.map((c) => c.id);
 
-    // Scheduled posts reference the connection; clear them first
-    await supabase.from('scheduled_posts').delete().in('user_id', userIds);
-    await supabase.from('meta_connections').delete().eq('meta_user_id', metaUserId);
+    // Scope the cascade by CONNECTION id, never by user id. Filtering on
+    // user_id deleted every scheduled_posts row that person owned — including
+    // their LinkedIn posts, which this webhook has no business touching, and
+    // (once one Meta account can appear in several workspaces) posts belonging
+    // to a workspace connected to an entirely different Meta account.
+    //
+    // scheduled_posts.meta_connection_id is ON DELETE CASCADE, so the first
+    // delete is belt-and-braces; it makes the intent explicit.
+    await supabase.from('scheduled_posts').delete().in('meta_connection_id', connectionIds);
+    await supabase.from('meta_connections').delete().in('id', connectionIds);
 
     return connections.length;
 };
@@ -118,7 +129,7 @@ const loadConnection = async (req, res) => {
     const { data: connection, error } = await supabase
         .from('meta_connections')
         .select('*')
-        .eq('user_id', req.user.id)
+        .eq('workspace_id', req.workspaceId)
         .eq('is_active', true)
         .single();
 
@@ -141,14 +152,16 @@ const loadConnection = async (req, res) => {
 };
 
 // Helper to handle Meta API errors
-const handleMetaError = async (res, userId, errorResult) => {
+// Scoped to the workspace: a bad token in one workspace must not deactivate
+// the same person's connections in the others.
+const handleMetaError = async (res, workspaceId, errorResult) => {
     if (errorResult.code === 190 || errorResult.code === 463 || errorResult.code === 467) {
-        console.log(`🔒 [Meta] Token expired/invalid (Code ${errorResult.code}) for user ${userId}. Deactivating connection.`);
+        console.log(`🔒 [Meta] Token expired/invalid (Code ${errorResult.code}) in workspace ${workspaceId}. Deactivating connection.`);
 
         await supabase
             .from('meta_connections')
             .update({ is_active: false })
-            .eq('user_id', userId);
+            .eq('workspace_id', workspaceId);
 
         return res.status(401).json({
             success: false,
@@ -165,43 +178,15 @@ const handleMetaError = async (res, userId, errorResult) => {
  * Upload Media for Posts
  * POST /api/meta/posts/upload-media
  */
-router.post('/posts/upload-media', upload.array('files'), async (req, res) => {
+router.post('/posts/upload-media', postMediaUpload.array('files'), async (req, res) => {
     try {
-        const userId = req.user.id;
-        const files = req.files;
+        const result = await uploadPostMedia(req.user.id, req.files || [], req.workspaceId);
 
-        if (!files || files.length === 0) {
-            return res.status(400).json({ error: 'No files uploaded' });
+        if (!result.success) {
+            return res.status(400).json({ error: result.error });
         }
 
-        const uploadedUrls = [];
-
-        for (const file of files) {
-            const filename = `${userId}/${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9.-]/g, '')}`;
-
-            const { error } = await supabase
-                .storage
-                .from('post-media')
-                .upload(filename, file.buffer, {
-                    contentType: file.mimetype,
-                    upsert: false
-                });
-
-            if (error) {
-                console.error('Supabase upload error:', error);
-                throw error;
-            }
-
-            const { data: { publicUrl } } = supabase
-                .storage
-                .from('post-media')
-                .getPublicUrl(filename);
-
-            uploadedUrls.push(publicUrl);
-        }
-
-        res.json({ success: true, urls: uploadedUrls });
-
+        res.json({ success: true, urls: result.urls });
     } catch (error) {
         console.error('Upload error:', error);
         res.status(500).json({ error: `Upload failed: ${error.message}` });
@@ -253,7 +238,7 @@ router.post('/connect-api-key', async (req, res) => {
         const { data: existingConn } = await supabase
             .from('meta_connections')
             .select('whatsapp_phone_id, waba_id, meta_user_id, selected_page_ids')
-            .eq('user_id', userId)
+            .eq('workspace_id', req.workspaceId)
             .single();
 
         // Reconnecting the same Meta account keeps the chosen Pages; a
@@ -264,6 +249,9 @@ router.post('/connect-api-key', async (req, res) => {
         const { error } = await supabase
             .from('meta_connections')
             .upsert({
+                workspace_id: req.workspaceId,
+                // Who connected it. The workspace owns the connection, so a
+                // later reconnect by a different member overwrites this.
                 user_id: userId,
                 connection_type: 'api_key',
                 // App-scoped Meta user id — how Meta identifies the person in
@@ -281,7 +269,7 @@ router.post('/connect-api-key', async (req, res) => {
                 selected_page_ids: carriedSelection,
                 updated_at: new Date().toISOString()
             }, {
-                onConflict: 'user_id'
+                onConflict: 'workspace_id'
             })
             .select()
             .single();
@@ -378,7 +366,7 @@ router.get('/connection', async (req, res) => {
         const { data: connection, error } = await supabase
             .from('meta_connections')
             .select('*')
-            .eq('user_id', userId)
+            .eq('workspace_id', req.workspaceId)
             .eq('is_active', true)
             .single();
 
@@ -448,7 +436,7 @@ router.delete('/disconnect', async (req, res) => {
         const { error } = await supabase
             .from('meta_connections')
             .delete()
-            .eq('user_id', userId);
+            .eq('workspace_id', req.workspaceId);
 
         if (error) throw error;
 
@@ -490,7 +478,7 @@ router.post('/refresh-accounts', async (req, res) => {
                 selected_page_ids: prunedSelection,
                 updated_at: new Date().toISOString()
             })
-            .eq('user_id', req.user.id);
+            .eq('workspace_id', req.workspaceId);
 
         if (updateError) throw updateError;
 
@@ -535,7 +523,7 @@ router.post('/pages/select', async (req, res) => {
                 selected_page_ids: pageIds.map(String),
                 updated_at: new Date().toISOString()
             })
-            .eq('user_id', req.user.id);
+            .eq('workspace_id', req.workspaceId);
 
         if (error) throw error;
 
@@ -561,7 +549,7 @@ router.get('/instagram/accounts', async (req, res) => {
 
         const pagesResult = await ctx.metaService.getPages();
         if (!pagesResult.success) {
-            return handleMetaError(res, req.user.id, pagesResult);
+            return handleMetaError(res, req.workspaceId, pagesResult);
         }
 
         const accounts = (pagesResult.pages || [])
@@ -596,7 +584,7 @@ router.get('/instagram/media', async (req, res) => {
 
         const tokenResult = await ctx.metaService.getPageToken(pageId);
         if (!tokenResult.success) {
-            return handleMetaError(res, req.user.id, tokenResult);
+            return handleMetaError(res, req.workspaceId, tokenResult);
         }
 
         const igResult = await ctx.metaService.getInstagramAccount(pageId, tokenResult.pageAccessToken);
@@ -611,7 +599,7 @@ router.get('/instagram/media', async (req, res) => {
         );
 
         if (!media.success) {
-            return handleMetaError(res, req.user.id, media);
+            return handleMetaError(res, req.workspaceId, media);
         }
 
         // Remaining publishing quota (Meta allows 25 posts / 24h per account).
@@ -660,7 +648,7 @@ router.post('/posts/publish', async (req, res) => {
 
         const tokenResult = await ctx.metaService.getPageToken(pageId);
         if (!tokenResult.success) {
-            return handleMetaError(res, req.user.id, tokenResult);
+            return handleMetaError(res, req.workspaceId, tokenResult);
         }
 
         const { page, pageAccessToken } = tokenResult;
@@ -705,6 +693,7 @@ router.post('/posts/publish', async (req, res) => {
         const { error: recordError } = await supabase
             .from('scheduled_posts')
             .insert({
+                workspace_id: req.workspaceId,
                 user_id: req.user.id,
                 meta_connection_id: ctx.connection.id,
                 page_id: pageId,
@@ -773,7 +762,7 @@ router.post('/posts/schedule', async (req, res) => {
         const { data: connection, error: connError } = await supabase
             .from('meta_connections')
             .select('*')
-            .eq('user_id', userId)
+            .eq('workspace_id', req.workspaceId)
             .eq('is_active', true)
             .single();
 
@@ -795,6 +784,7 @@ router.post('/posts/schedule', async (req, res) => {
         const { data: scheduledPost, error } = await supabase
             .from('scheduled_posts')
             .insert({
+                workspace_id: req.workspaceId,
                 user_id: userId,
                 meta_connection_id: connection.id,
                 page_id: pageId,
@@ -838,7 +828,7 @@ router.get('/posts/scheduled', async (req, res) => {
         let query = supabase
             .from('scheduled_posts')
             .select('*')
-            .eq('user_id', userId)
+            .eq('workspace_id', req.workspaceId)
             .order('scheduled_time', { ascending: true })
             .limit(parseInt(limit, 10));
 
@@ -879,7 +869,7 @@ router.delete('/posts/:id', async (req, res) => {
             .from('scheduled_posts')
             .select('*')
             .eq('id', id)
-            .eq('user_id', userId)
+            .eq('workspace_id', req.workspaceId)
             .single();
 
         if (fetchError || !post) {
@@ -902,7 +892,7 @@ router.delete('/posts/:id', async (req, res) => {
                 .from('scheduled_posts')
                 .delete()
                 .eq('id', id)
-                .eq('user_id', userId)
+                .eq('workspace_id', req.workspaceId)
                 .eq('status', post.status)
                 .select('id');
             if (error) throw error;
@@ -995,7 +985,7 @@ router.delete('/posts/:id', async (req, res) => {
             .from('scheduled_posts')
             .update({ publish_results: nextResults, updated_at: new Date().toISOString() })
             .eq('id', id)
-            .eq('user_id', userId);
+            .eq('workspace_id', req.workspaceId);
 
         return res.status(409).json({
             success: false,
@@ -1028,7 +1018,10 @@ router.get('/posts/metrics', async (req, res) => {
         const { data: posts, error } = await supabase
             .from('scheduled_posts')
             .select('id, page_id, page_name, content, platforms, publish_results, published_at, media_urls')
-            .eq('user_id', req.user.id)
+            .eq('workspace_id', req.workspaceId)
+            // Meta rows only -- a LinkedIn row has no Page token to resolve.
+            // Its metrics come from GET /api/linkedin/posts/metrics.
+            .eq('provider', 'meta')
             .eq('status', 'published')
             .order('published_at', { ascending: false })
             .limit(limit);

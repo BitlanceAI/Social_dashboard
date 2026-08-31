@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Facebook, Instagram } from 'lucide-react';
+import { Facebook } from 'lucide-react';
+import { platformMeta, providerOf, prefixFor, charLimitFor } from '@/features/meta/lib/providers';
 import AnalyticsPanel from '@/features/meta/components/AnalyticsPanel';
 import CreatePostHub from '@/features/meta/components/CreatePostHub';
 import SocialProfilesPanel from '@/features/meta/components/SocialProfilesPanel';
+import AddProfileModal from '@/features/meta/components/AddProfileModal';
 import PageSelectModal from '@/features/meta/components/PageSelectModal';
 import NotificationToggle from '@/features/notifications/components/NotificationToggle';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/features/auth/context/AuthContext';
+import { useWorkspace, WorkspaceSwitcher } from '@/features/workspace';
+import Logo from '@/shared/components/layout/Logo';
 import { supabase } from '@/shared/lib/supabase';
 import toast from 'react-hot-toast';
 import {
@@ -55,10 +59,11 @@ import API_BASE_URL from '@/shared/config';
 
 import DashboardSidebar, { DashboardMobileNav } from '@/features/meta/components/DashboardSidebar';
 
-const MetaDashboardPage = () => {
+const MetaDashboardView = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const { user } = useAuth();
+    const { activeWorkspaceId } = useWorkspace();
 
     // Session state (fetched from Supabase)
     const [activeTab, setActiveTab] = useState('create');
@@ -66,9 +71,10 @@ const MetaDashboardPage = () => {
     const [publishMode, setPublishMode] = useState('schedule');
     const [session, setSession] = useState(null);
 
-    // Connection state
-    const [isConnected, setIsConnected] = useState(false);
-    const [connection, setConnection] = useState(null);
+    // Connection state. Each provider connects independently, so the
+    // dashboard is usable with either one on its own.
+    const [connection, setConnection] = useState(null);          // Meta
+    const [liConnection, setLiConnection] = useState(null);      // LinkedIn
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
@@ -107,6 +113,46 @@ const MetaDashboardPage = () => {
 
     // Helper to update form
     const updateScheduleForm = (updates) => setScheduleFormData(prev => ({ ...prev, ...updates }));
+
+    // Either provider on its own is enough to use the dashboard.
+    const isConnected = Boolean(connection) || Boolean(liConnection);
+
+    /**
+     * Every account this user can publish to, flattened into one shape so the
+     * composer does not care which network a target came from.
+     *
+     * `platforms` is what the target accepts: a Facebook Page with a linked
+     * Instagram account offers both, which is what replaces the
+     * `instagram_business_account` checks previously scattered through the UI.
+     */
+    const targets = [
+        ...(connection?.pages || []).map((page) => ({
+            id: String(page.id),
+            name: page.name,
+            subtitle: page.category || 'Facebook Page',
+            provider: 'meta',
+            avatarUrl: page.picture?.data?.url || null,
+            platforms: page.instagram_business_account ? ['facebook', 'instagram'] : ['facebook'],
+            igUsername: page.instagram_business_account?.username || null,
+        })),
+        ...(liConnection?.actors || []).map((actor) => ({
+            id: actor.urn,
+            name: actor.name,
+            subtitle: actor.type === 'org' ? 'LinkedIn Page' : 'LinkedIn profile',
+            provider: 'linkedin',
+            avatarUrl: actor.avatarUrl || null,
+            platforms: ['linkedin'],
+        })),
+    ];
+
+    const targetById = (id) => targets.find((t) => t.id === String(id));
+
+    // How many posts each profile has in the queue/history, for its card chip.
+    const postCounts = scheduledPosts.reduce((acc, post) => {
+        const key = String(post.page_id);
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, {});
 
     // Listen for auth state changes (handles both initial load and OAuth redirects)
     useEffect(() => {
@@ -190,6 +236,12 @@ const MetaDashboardPage = () => {
         if (oauthSuccess && token && session?.access_token && !oauthProcessedRef.current) {
             oauthProcessedRef.current = true;
             handleOAuthComplete(token, session.access_token);
+        } else if (searchParams.get('linkedin_connected') && session?.access_token) {
+            // The LinkedIn callback already wrote the connection server-side --
+            // there is no token in this URL to hand back. Just re-read it.
+            toast.success('LinkedIn account connected');
+            checkLinkedInConnection();
+            window.history.replaceState({}, '', '/socialdashboad');
         } else if (error) {
             toast.error(`Connection failed: ${error}`);
         }
@@ -199,7 +251,7 @@ const MetaDashboardPage = () => {
     useEffect(() => {
         if (session?.access_token && !dataLoadedRef.current) {
             dataLoadedRef.current = true;
-            checkConnection();
+            loadAllConnections();
         }
     }, [session]);
 
@@ -219,6 +271,10 @@ const MetaDashboardPage = () => {
     const getAuthHeaders = (authToken) => ({
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${authToken || session?.access_token || authTokenRef.current}`,
+        // Scopes every request to one workspace. Omitted when unknown, and the
+        // server then resolves the caller's default -- which is what lets an
+        // older client keep working against a workspace-aware server.
+        ...(activeWorkspaceId ? { 'x-workspace-id': activeWorkspaceId } : {}),
         // When the API is reached through an ngrok tunnel, ngrok serves an HTML
         // interstitial to anything with a browser User-Agent. That page carries
         // no CORS headers, so fetch() fails before reaching our server. This
@@ -235,14 +291,11 @@ const MetaDashboardPage = () => {
             const data = await response.json();
 
             if (data.connected && data.isValid) {
-                setIsConnected(true);
                 setConnection(data);
                 // Fresh connection: ask which Pages to actually use
                 if (data.needsPageSelection) setShowPagePicker(true);
-                // Load the publishing queue
-                await loadScheduledPosts();
             } else {
-                setIsConnected(false);
+                setConnection(null);
                 // If it was previously connected but now isn't valid, show toast
                 if (data.connected === false && data.isValid === false) {
                     toast.error('Meta session expired. Please reconnect.');
@@ -255,11 +308,54 @@ const MetaDashboardPage = () => {
         }
     };
 
-    const handleAuthError = (status, data) => {
+    /**
+     * LinkedIn connection status.
+     *
+     * Deliberately separate from checkConnection: a user with only one of the
+     * two connected must still get a working dashboard, so neither call may
+     * gate the other.
+     */
+    const checkLinkedInConnection = async () => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/linkedin/connection`, {
+                headers: getAuthHeaders()
+            });
+            const data = await response.json();
+
+            setLiConnection(data.connected && data.isValid ? data : null);
+
+            // LinkedIn tokens last 60 days and this app cannot refresh them,
+            // so the only remedy is asking in good time.
+            if (data.connected && data.needsReconnect) {
+                toast(data.expired
+                    ? 'Your LinkedIn connection expired. Reconnect to keep posting.'
+                    : `Your LinkedIn connection expires in ${data.daysUntilExpiry} days.`,
+                    { icon: '\u26a0\ufe0f' });
+            }
+        } catch (error) {
+            console.error('LinkedIn connection check failed:', error);
+        }
+    };
+
+    /** Both providers, then the shared publishing queue. */
+    const loadAllConnections = async () => {
+        await Promise.all([checkConnection(), checkLinkedInConnection()]);
+        await loadScheduledPosts();
+    };
+
+    /**
+     * Both providers answer an expired token with 401 + TOKEN_EXPIRED, so one
+     * handler covers them -- it just needs to know whose connection to clear.
+     */
+    const handleAuthError = (status, data, provider = 'meta') => {
         if (status === 401 && data?.code === 'TOKEN_EXPIRED') {
-            setIsConnected(false);
-            setConnection(null);
-            toast.error('Meta session expired. Please reconnect.');
+            if (provider === 'linkedin') {
+                setLiConnection(null);
+                toast.error('LinkedIn session expired. Please reconnect.');
+            } else {
+                setConnection(null);
+                toast.error('Meta session expired. Please reconnect.');
+            }
             return true;
         }
         return false;
@@ -294,12 +390,16 @@ const MetaDashboardPage = () => {
      * metaService.DEFAULT_SCOPES and the redirect URI is the one registered in
      * the Meta app dashboard.
      */
-    const handleOAuthConnect = async () => {
+    const handleOAuthConnect = async (provider = 'meta', target) => {
         try {
             setConnecting(true);
             oauthProcessedRef.current = false;
 
-            const response = await fetch(`${API_BASE_URL}/api/meta/oauth/url`, {
+            // `target` picks the LinkedIn scope set: 'member' for a personal
+            // profile, 'organization' to also request Company Page posting.
+            const query = target ? `?target=${encodeURIComponent(target)}` : '';
+
+            const response = await fetch(`${API_BASE_URL}${prefixFor(provider)}/oauth/url${query}`, {
                 headers: getAuthHeaders()
             });
             const data = await response.json();
@@ -307,11 +407,11 @@ const MetaDashboardPage = () => {
             if (data.success && data.url) {
                 window.location.href = data.url;
             } else {
-                throw new Error(data.error || 'Could not build the Facebook login URL');
+                throw new Error(data.error || 'Could not build the sign-in URL');
             }
         } catch (error) {
-            console.error('Meta OAuth error:', error);
-            toast.error(error.message || 'Failed to start Facebook login');
+            console.error('OAuth error:', error);
+            toast.error(error.message || 'Failed to start sign-in');
             setConnecting(false);
         }
     };
@@ -346,11 +446,56 @@ const MetaDashboardPage = () => {
         }
     };
 
-    const handleDisconnect = async () => {
-        if (!confirm('Are you sure you want to disconnect your Meta account?')) return;
+    /**
+     * Remove a single profile from the dashboard.
+     *
+     * The two providers differ in what that can mean. A LinkedIn connection is
+     * one member, so removing it is a disconnect. A Meta connection can cover
+     * several Pages, so removing one deselects it and leaves the rest working
+     * -- disconnecting Meta wholesale over one Page would be a nasty surprise.
+     */
+    const handleRemoveTarget = async (target) => {
+        if (target.provider === 'linkedin') {
+            return handleDisconnect('linkedin');
+        }
+
+        const remaining = targets
+            .filter((t) => t.provider === 'meta' && t.id !== target.id)
+            .map((t) => t.id);
+
+        if (remaining.length === 0) {
+            // Nothing would be left to publish to, so this is a disconnect.
+            return handleDisconnect('meta');
+        }
+
+        if (!confirm(`Remove ${target.name} from this dashboard? Your other Pages stay connected.`)) return;
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/meta/disconnect`, {
+            const res = await fetch(`${API_BASE_URL}/api/meta/pages/select`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ pageIds: remaining })
+            });
+            const data = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+                toast.error(data.error || 'Could not remove that profile');
+                return;
+            }
+
+            toast.success(`${target.name} removed`);
+            await checkConnection();
+        } catch (error) {
+            toast.error('Could not remove that profile');
+        }
+    };
+
+    const handleDisconnect = async (provider = 'meta') => {
+        const label = provider === 'linkedin' ? 'LinkedIn' : 'Meta';
+        if (!confirm(`Are you sure you want to disconnect your ${label} account?`)) return;
+
+        try {
+            const response = await fetch(`${API_BASE_URL}${prefixFor(provider)}/disconnect`, {
                 method: 'DELETE',
                 headers: getAuthHeaders()
             });
@@ -362,10 +507,12 @@ const MetaDashboardPage = () => {
                 return;
             }
 
-            toast.success('Meta account disconnected');
-            setIsConnected(false);
-            setConnection(null);
-            setScheduledPosts([]);
+            toast.success(`${label} account disconnected`);
+            if (provider === 'linkedin') setLiConnection(null);
+            else setConnection(null);
+            // Rows for the other provider are still valid, so re-read the queue
+            // rather than clearing it outright.
+            await loadScheduledPosts();
         } catch (error) {
             toast.error('Failed to disconnect');
         }
@@ -375,13 +522,16 @@ const MetaDashboardPage = () => {
         setRefreshing(true);
         try {
             await Promise.all([
-                fetch(`${API_BASE_URL}/api/meta/refresh-accounts`, {
+                connection && fetch(`${API_BASE_URL}/api/meta/refresh-accounts`, {
                     method: 'POST',
                     headers: getAuthHeaders()
                 }),
-                loadScheduledPosts()
-            ]);
-            await checkConnection();
+                liConnection && fetch(`${API_BASE_URL}/api/linkedin/refresh-accounts`, {
+                    method: 'POST',
+                    headers: getAuthHeaders()
+                }),
+            ].filter(Boolean));
+            await loadAllConnections();
             toast.success('Data refreshed');
         } catch (error) {
             toast.error('Refresh failed');
@@ -407,6 +557,11 @@ const MetaDashboardPage = () => {
             return;
         }
 
+        // One post targets one provider; validateStep(1) blocks a mixed
+        // selection, so the first platform decides which API this goes to.
+        const provider = providerOf(scheduleFormData.platforms);
+        const prefix = prefixFor(provider);
+
         setSubmitting(true);
         try {
             let finalMediaUrls = scheduleFormData.mediaUrls.filter(url => url.trim() !== '' && !url.startsWith('blob:'));
@@ -422,7 +577,7 @@ const MetaDashboardPage = () => {
                 const headers = getAuthHeaders();
                 if (headers['Content-Type']) delete headers['Content-Type'];
 
-                const uploadRes = await fetch(`${API_BASE_URL}/api/meta/posts/upload-media`, {
+                const uploadRes = await fetch(`${API_BASE_URL}${prefix}/posts/upload-media`, {
                     method: 'POST',
                     headers: headers,
                     body: formData
@@ -441,7 +596,7 @@ const MetaDashboardPage = () => {
             // The input `scheduleFormData.scheduledTime` is in local time (e.g. "2026-02-07T15:35")
             // We create a Date object which defaults to browser's timezone (IST)
             // Then toISOString() converts it to UTC (e.g. "2026-02-07T10:05:00.000Z")
-            const endpoint = publishNow ? '/api/meta/posts/publish' : '/api/meta/posts/schedule';
+            const endpoint = `${prefix}${publishNow ? '/posts/publish' : '/posts/schedule'}`;
 
             const payload = publishNow
                 ? {
@@ -478,6 +633,9 @@ const MetaDashboardPage = () => {
                     setActiveTab('history');
                 } else {
                     toast.success('Post scheduled successfully!');
+                    // The server flags a LinkedIn post scheduled past the
+                    // 60-day token expiry -- it would fail silently otherwise.
+                    if (data.warning) toast(data.warning, { icon: '⚠️', duration: 10000 });
                 }
                 setShowScheduleModal(false);
                 setScheduleStep(1);
@@ -530,13 +688,14 @@ const MetaDashboardPage = () => {
     const handleDeleteScheduledPost = async (post) => {
         // A published post is live on Meta; a pending one only exists here.
         const isPublished = post?.status === 'published';
+        const network = post?.provider === 'linkedin' ? 'LinkedIn' : 'Facebook';
         const confirmText = isPublished
-            ? 'Delete this post from Facebook? This cannot be undone.'
+            ? `Delete this post from ${network}? This cannot be undone.`
             : 'Cancel this scheduled post?';
         if (!confirm(confirmText)) return;
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/meta/posts/${post.id}`, {
+            const response = await fetch(`${API_BASE_URL}${prefixFor(post.provider)}/posts/${post.id}`, {
                 method: 'DELETE',
                 headers: getAuthHeaders()
             });
@@ -576,19 +735,42 @@ const MetaDashboardPage = () => {
     // Validation for each wizard step
     const validateStep = (step) => {
         switch (step) {
-            case 1:
+            case 1: {
                 if (!scheduleFormData.pageId) return 'Please select a page';
+                // A scheduled_posts row carries one provider, so a post cannot
+                // span both networks. Two separate posts, two separate rows.
+                const providers = new Set(scheduleFormData.platforms.map((id) => platformMeta(id).provider));
+                if (providers.size > 1) {
+                    return 'Pick one network per post -- LinkedIn and Meta are published separately';
+                }
                 return true;
-            case 2:
-                if (!scheduleFormData.content && scheduleFormData.mediaUrls.length === 0 && scheduleFormData.mediaFiles.length === 0) {
+            }
+            case 2: {
+                const mediaCount = scheduleFormData.mediaUrls.length + scheduleFormData.mediaFiles.length;
+
+                if (!scheduleFormData.content && mediaCount === 0) {
                     return 'Please add content or media';
                 }
+
                 // Instagram's API cannot publish text-only posts
-                if (scheduleFormData.platforms.includes('instagram')
-                    && scheduleFormData.mediaUrls.length === 0 && scheduleFormData.mediaFiles.length === 0) {
-                    return 'Instagram posts require at least one image or video';
+                const needsMedia = scheduleFormData.platforms.find((id) => platformMeta(id).requiresMedia);
+                if (needsMedia && mediaCount === 0) {
+                    return `${platformMeta(needsMedia).label} posts require at least one image or video`;
                 }
+
+                const limit = charLimitFor(scheduleFormData.platforms);
+                if ((scheduleFormData.content || '').length > limit) {
+                    return `That is over the ${limit.toLocaleString()} character limit for this network`;
+                }
+
+                // Multi-image LinkedIn posts need a different content shape
+                // (content.multiImage) that is not built yet.
+                if (scheduleFormData.platforms.includes('linkedin') && mediaCount > 1) {
+                    return 'LinkedIn posts currently support one image or video';
+                }
+
                 return true;
+            }
             case 3: {
                 if (!scheduleFormData.scheduledTime) return 'Please select a schedule time';
                 const when = new Date(scheduleFormData.scheduledTime);
@@ -622,6 +804,15 @@ const MetaDashboardPage = () => {
                 publishedCount={publishedPosts.length}
             />
 
+            <div className="flex-1 min-w-0 flex flex-col">
+                {/* Mobile header. DashboardMobileNav is five equal items with no
+                    room for a sixth, and no brand or account affordance at all —
+                    so the switcher gets its own strip up here instead. */}
+                <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between gap-3 px-4 py-3 border-b border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur">
+                    <Logo className="h-6" />
+                    <WorkspaceSwitcher compact />
+                </div>
+
             <main className="flex-1 min-w-0 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-10 py-6 sm:py-10 pb-32 lg:pb-16">
 
 
@@ -636,11 +827,13 @@ const MetaDashboardPage = () => {
                     <SocialProfilesPanel
                         loading={loading}
                         isConnected={isConnected}
+                        targets={targets}
+                        linkedinConnection={liConnection}
+                        postCounts={postCounts}
+                        onAddProfile={() => setShowConnectModal(true)}
                         onManagePages={() => setShowPagePicker(true)}
-                        pages={connection?.pages || []}
-                        onConnect={() => setShowConnectModal(true)}
                         onRefresh={handleRefresh}
-                        onDisconnect={handleDisconnect}
+                        onRemoveTarget={handleRemoveTarget}
                         refreshing={refreshing}
                     />
                 )}
@@ -734,7 +927,7 @@ const MetaDashboardPage = () => {
                                                 {targets.map(platform => {
                                                     const r = results[platform];
                                                     const ok = r ? r.success : true;
-                                                    const Icon = platform === 'instagram' ? Instagram : Facebook;
+                                                    const Icon = platformMeta(platform).Icon;
                                                     return (
                                                         <span
                                                             key={platform}
@@ -799,12 +992,15 @@ const MetaDashboardPage = () => {
                 {/* Analytics tab */}
                 {activeTab === 'analytics' && isConnected && (
                     <AnalyticsPanel
+                        hasMeta={Boolean(connection)}
+                        hasLinkedIn={Boolean(liConnection)}
                         posts={scheduledPosts}
                         authHeaders={getAuthHeaders}
                     />
                 )}
 
             </main>
+            </div>
 
             </div>{/* end sidebar + content layout */}
 
@@ -815,44 +1011,15 @@ const MetaDashboardPage = () => {
             />
 
             {/* Connect Modal */}
-            {showConnectModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-                    <div className="bg-[var(--surface)] rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden">
-                        <div className="p-6 border-b border-[var(--border)]">
-                            <div className="flex items-center justify-between">
-                                <h3 className="text-xl font-bold text-[var(--text)]">Connect Meta Account</h3>
-                                <button
-                                    onClick={() => setShowConnectModal(false)}
-                                    className="p-2 rounded-lg hover:bg-[var(--surface-2)] text-[var(--muted)] transition-colors"
-                                >
-                                    <X className="h-5 w-5" />
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="p-6">
-                            <div className="text-center py-8">
-                                <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-[#1877F2] flex items-center justify-center">
-                                    <svg className="w-10 h-10 text-white" fill="currentColor" viewBox="0 0 24 24">
-                                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                                    </svg>
-                                </div>
-                                <p className="text-[var(--muted)] mb-6 max-w-sm mx-auto leading-relaxed">
-                                    Sign in with Facebook to connect your Pages and any linked
-                                    Instagram Business accounts. We never see your password.
-                                </p>
-                                <button
-                                    onClick={handleOAuthConnect}
-                                    className="inline-flex items-center gap-2 px-8 py-4 rounded-xl bg-[#1877F2] text-white font-semibold hover:bg-[#166FE5] transition-colors"
-                                >
-                                    <ExternalLink className="h-5 w-5" />
-                                    Continue with Facebook
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <AddProfileModal
+                isOpen={showConnectModal}
+                orgConnectAvailable={liConnection?.orgConnectAvailable ?? false}
+                onClose={() => setShowConnectModal(false)}
+                onSelect={(provider, target) => {
+                    setShowConnectModal(false);
+                    handleOAuthConnect(provider, target);
+                }}
+            />
 
             <PageSelectModal
                 isOpen={showPagePicker}
@@ -876,16 +1043,20 @@ const MetaDashboardPage = () => {
             >
                 {scheduleStep === 1 && (
                     <StepAccount
-                        pages={connection?.pages || []}
-                        selectedPageId={scheduleFormData.pageId}
+                        targets={targets}
+                        selectedTargetId={scheduleFormData.pageId}
                         platforms={scheduleFormData.platforms}
-                        onSelect={(pageId) => {
-                            const page = (connection?.pages || []).find(p => String(p.id) === String(pageId));
-                            // Drop Instagram if the newly picked page has no linked IG account
-                            const platforms = page?.instagram_business_account
-                                ? scheduleFormData.platforms
-                                : scheduleFormData.platforms.filter(pl => pl !== 'instagram');
-                            updateScheduleForm({ pageId, platforms: platforms.length ? platforms : ['facebook'] });
+                        onSelect={(targetId) => {
+                            const target = targetById(targetId);
+                            // Keep whatever the previous selection still supports;
+                            // a Page with no linked Instagram, or any LinkedIn
+                            // target, will not offer 'instagram'.
+                            const kept = scheduleFormData.platforms
+                                .filter((pl) => target?.platforms.includes(pl));
+                            updateScheduleForm({
+                                pageId: targetId,
+                                platforms: kept.length ? kept : [target?.platforms[0] ?? 'facebook'],
+                            });
                         }}
                         onPlatformsChange={(platforms) => updateScheduleForm({ platforms })}
                     />
@@ -893,6 +1064,7 @@ const MetaDashboardPage = () => {
 
                 {scheduleStep === 2 && (
                     <StepContent
+                        platforms={scheduleFormData.platforms}
                         content={scheduleFormData.content}
                         linkUrl={scheduleFormData.linkUrl}
                         mediaUrls={scheduleFormData.mediaUrls}
@@ -919,6 +1091,20 @@ const MetaDashboardPage = () => {
             </SchedulePostModal>
         </div>
     );
+};
+
+/**
+ * Remounting on a workspace change is deliberate.
+ *
+ * The view holds a dozen pieces of connection state plus three refs -- notably
+ * dataLoadedRef, which makes the loader fire exactly once per mount and would
+ * otherwise swallow the reload. Keying the subtree resets every one of them,
+ * including AnalyticsPanel's effect, whose dependency array would otherwise miss
+ * a switch between two workspaces that happen to have the same post count.
+ */
+const MetaDashboardPage = () => {
+    const { activeWorkspaceId } = useWorkspace();
+    return <MetaDashboardView key={activeWorkspaceId || 'none'} />;
 };
 
 export default MetaDashboardPage;

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Logo from '@/shared/components/layout/Logo';
+import { WorkspaceSwitcher } from '@/features/workspace';
 import { useAuth } from '@/features/auth/context/AuthContext';
 import toast from 'react-hot-toast';
 import { useTheme } from '@/shared/context/ThemeContext';
@@ -72,9 +73,14 @@ const DashboardSidebar = ({
     return (
         <aside className="hidden lg:flex lg:flex-col w-64 shrink-0 sticky top-0 h-screen border-r border-[var(--border)] bg-[var(--bg)] px-4 py-6">
             {/* Brand */}
-            <Link to="/" className="flex items-center px-1 mb-8">
+            <Link to="/" className="flex items-center px-1 mb-5">
                 <Logo className="h-7" />
             </Link>
+
+            {/* Which client's accounts you are working in */}
+            <div className="mb-6">
+                <WorkspaceSwitcher />
+            </div>
 
 
             {/* Navigation */}

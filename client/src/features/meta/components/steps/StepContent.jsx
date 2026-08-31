@@ -1,5 +1,6 @@
 import React from 'react';
 import { FileText, Link2 } from 'lucide-react';
+import { charLimitFor } from '@/features/meta/lib/providers';
 import MediaSelector from '@/features/meta/components/MediaSelector';
 
 /**
@@ -7,6 +8,7 @@ import MediaSelector from '@/features/meta/components/MediaSelector';
  * Post text, media, and link URL
  */
 const StepContent = ({
+    platforms = [],
     content,
     linkUrl,
     mediaUrls,
@@ -15,6 +17,10 @@ const StepContent = ({
     onLinkChange,
     onMediaUpdate,
 }) => {
+    // Facebook allows 63,206 characters, Instagram 2,200, LinkedIn 3,000 --
+    // show whichever selected network is strictest.
+    const charLimit = charLimitFor(platforms);
+
     return (
         <div className="space-y-6">
             <h4 className="text-xl font-extrabold font-['Space_Grotesk'] text-[var(--text)] tracking-tight flex items-center gap-3 border-l-4 border-[var(--accent)] pl-3 mb-6">
@@ -37,7 +43,7 @@ const StepContent = ({
                             className="w-full px-4 py-3 border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] focus:border-[var(--accent)] focus:ring-0 focus:outline-none resize-none transition-colors rounded-xl text-sm placeholder-gray-600"
                         />
                         <p className="text-xs text-[var(--muted)] text-right mt-2">
-                            {content?.length || 0} / 63,206 characters
+                            {(content?.length || 0).toLocaleString()} / {charLimit.toLocaleString()} characters
                         </p>
                     </div>
 

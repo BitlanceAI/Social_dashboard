@@ -2,6 +2,7 @@ import { HelmetProvider } from 'react-helmet-async';
 import { Toaster } from 'react-hot-toast';
 
 import { AuthProvider } from '@/features/auth';
+import { WorkspaceProvider } from '@/features/workspace';
 import { ThemeProvider } from '@/shared/context/ThemeContext';
 
 /**
@@ -13,8 +14,10 @@ export default function AppProviders({ children }) {
     <HelmetProvider>
       <ThemeProvider>
         <AuthProvider>
-          <Toaster position="top-right" reverseOrder={false} />
-          {children}
+          <WorkspaceProvider>
+            <Toaster position="top-right" reverseOrder={false} />
+            {children}
+          </WorkspaceProvider>
         </AuthProvider>
       </ThemeProvider>
     </HelmetProvider>
