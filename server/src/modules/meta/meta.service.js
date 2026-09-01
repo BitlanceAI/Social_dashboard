@@ -604,11 +604,15 @@ class MetaService {
         // Requesting anything we cannot screencast gets that permission
         // rejected, so messaging/comments scopes are deliberately absent
         // until those features exist.
+        // pages_manage_engagement is deliberately absent until it is added to
+        // the app's Meta use case / App Review — requesting a scope the app
+        // cannot ask for fails the WHOLE consent dialog ("Invalid Scopes").
+        // Re-adding it re-enables comment reply/hide/delete; reading comments
+        // works without it (pages_read_engagement).
         return [
             'pages_show_list',          // list Pages -> find linked IG account
             'pages_read_engagement',    // read Page fields + post comments
             'pages_manage_posts',       // publish to a Facebook Page
-            'pages_manage_engagement',  // reply to / hide / delete comments as the Page
             'instagram_basic',          // read IG profile + media
             'instagram_content_publish' // publish to IG Business account
         ];
