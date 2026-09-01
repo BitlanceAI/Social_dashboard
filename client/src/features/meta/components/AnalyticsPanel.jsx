@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
     Send,
     CheckCircle2,
@@ -7,23 +7,36 @@ import {
     Heart,
     MessageCircle,
     Share2,
-    Instagram,
-    Facebook,
-    ExternalLink,
+    RefreshCw,
 } from 'lucide-react';
+import {
+    ResponsiveContainer,
+    LineChart, Line,
+    BarChart, Bar,
+    XAxis, YAxis, CartesianGrid, Tooltip,
+} from 'recharts';
 import API_BASE_URL from '@/shared/config';
 import { platformMeta } from '@/features/meta/lib/providers';
 
 /**
  * Analytics panel.
  *
- * Reports on the posts THIS app published — the same set shown in Post
- * History — rather than everything on the connected accounts. Engagement
- * comes from pages_read_engagement / instagram_basic; there are no ad
- * metrics here, because the app does not request ads permissions.
+ * Engagement is read LIVE from Meta — every published post on the connected
+ * Pages and Instagram accounts, whether or not it went out through this app
+ * (the same source as Post History). LinkedIn is the exception: its API only
+ * exposes posts this app published, so those rows are app-tracked. No ad
+ * metrics — the app does not request ads permissions.
  */
 
-const Stat = ({ icon: Icon, label, value, tone = 'default' }) => {
+// Chart series colors — literal hex, validated for CVD separation and
+// contrast against both app surfaces (#111111 dark / #F5F5F5 light).
+const SERIES = {
+    likes: { label: 'Likes', color: '#0F9494' },
+    comments: { label: 'Comments', color: '#7C5CE8' },
+};
+
+const Stat = ({ icon, label, value, tone = 'default' }) => {
+    const Icon = icon;
     const tones = {
         default: 'text-[var(--text)]',
         good: 'text-[var(--accent)]',
@@ -43,55 +56,99 @@ const Stat = ({ icon: Icon, label, value, tone = 'default' }) => {
 
 const num = (v) => (v === null || v === undefined ? '—' : v.toLocaleString());
 
+/** Shared legend: a colored mark carries identity; the text wears text tokens. */
+const ChartLegend = () => (
+    <div className="flex items-center gap-4 mb-2">
+        {Object.values(SERIES).map(({ label, color }) => (
+            <span key={label} className="inline-flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
+                <span className="w-2.5 h-2.5 rounded-sm" style={{ background: color }} />
+                {label}
+            </span>
+        ))}
+    </div>
+);
+
+/** Tooltip as an HTML overlay, so it can wear the app's theme tokens. */
+const ChartTooltip = ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null;
+    return (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 shadow-lg">
+            <p className="text-[11px] font-mono text-[var(--muted)] mb-1">{label}</p>
+            {payload.map((entry) => (
+                <p key={entry.dataKey} className="flex items-center gap-1.5 text-[12px] text-[var(--text)]">
+                    <span className="w-2 h-2 rounded-sm" style={{ background: entry.color || entry.fill }} />
+                    {SERIES[entry.dataKey]?.label || entry.dataKey}: {num(entry.value)}
+                </p>
+            ))}
+        </div>
+    );
+};
+
+const axisTick = { fill: '#777777', fontSize: 11 };
+const gridStroke = { stroke: '#777777', strokeOpacity: 0.15 };
+
 const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn = false }) => {
-    const [rows, setRows] = useState(null);
+    const [liveRows, setLiveRows] = useState(null);      // live FB/IG posts
+    const [feedErrors, setFeedErrors] = useState([]);    // per-feed read failures
+    const [linkedinRows, setLinkedinRows] = useState([]); // app-tracked LinkedIn
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [reloadKey, setReloadKey] = useState(0);
 
-    // ── Delivery, from our own publishing queue ──
+    // ── Delivery (the app's own queue) ──
     const published = posts.filter(p => p.status === 'published');
     const failed = posts.filter(p => p.status === 'failed');
     const pending = posts.filter(p => p.status === 'pending' || p.status === 'processing');
     const attempted = published.length + failed.length;
     const successRate = attempted === 0 ? null : Math.round((published.length / attempted) * 100);
 
-    // ── Engagement, per published post ──
+    // ── Engagement: live platform data, same source as Post History ──
     useEffect(() => {
-        if (published.length === 0) { setRows([]); return; }
         let cancelled = false;
 
         (async () => {
             setLoading(true);
             setError(null);
             try {
-                // Each provider reads its own posts. Ask only the ones that are
-                // actually connected, so a LinkedIn-only user does not get a
-                // 404 from the Meta endpoint (and vice versa).
-                const sources = [
-                    hasMeta && '/api/meta/posts/metrics?limit=20',
-                    hasLinkedIn && '/api/linkedin/posts/metrics?limit=20',
-                ].filter(Boolean);
-
-                const responses = await Promise.all(sources.map(async (path) => {
-                    try {
-                        const res = await fetch(`${API_BASE_URL}${path}`, { headers: authHeaders() });
-                        return await res.json();
-                    } catch (e) {
-                        return { success: false, error: e.message };
-                    }
-                }));
-
+                const [metaRes, liRes] = await Promise.all([
+                    hasMeta
+                        ? fetch(`${API_BASE_URL}/api/meta/posts/history?limit=50`, { headers: authHeaders() })
+                            .then((r) => r.json()).catch((e) => ({ success: false, error: e.message }))
+                        : Promise.resolve({ success: true, posts: [] }),
+                    hasLinkedIn
+                        ? fetch(`${API_BASE_URL}/api/linkedin/posts/metrics?limit=20`, { headers: authHeaders() })
+                            .then((r) => r.json()).catch(() => ({ success: false }))
+                        : Promise.resolve({ success: true, posts: [] }),
+                ]);
                 if (cancelled) return;
 
-                const merged = responses.filter((d) => d.success).flatMap((d) => d.posts || []);
-                // One provider failing should not blank the whole tab.
-                const failure = responses.find((d) => !d.success);
-
-                if (merged.length || !failure) {
-                    setRows(merged.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt)));
-                    setError(null);
+                if (metaRes.success) {
+                    setLiveRows(metaRes.posts || []);
+                    setFeedErrors(metaRes.feedErrors || []);
                 } else {
-                    setError(failure.error || 'Could not load post metrics');
+                    setLiveRows([]);
+                    setError(metaRes.error || 'Could not load engagement from Meta');
+                }
+
+                // LinkedIn metrics rows carry per-platform metrics; flatten to
+                // the live-row shape so one table renders both.
+                if (liRes.success) {
+                    setLinkedinRows((liRes.posts || []).flatMap((post) =>
+                        Object.entries(post.metrics || {})
+                            .filter(([, m]) => !m.unavailable)
+                            .map(([platform, m]) => ({
+                                id: `${post.id}-${platform}`,
+                                platform,
+                                pageName: post.pageName || 'LinkedIn',
+                                message: post.content || '',
+                                mediaUrl: m.thumbnail || post.mediaUrl || null,
+                                permalink: m.permalink || null,
+                                publishedAt: post.publishedAt,
+                                likes: m.likes ?? null,
+                                comments: m.comments ?? null,
+                                shares: m.shares ?? null,
+                            })),
+                    ));
                 }
             } catch (e) {
                 if (!cancelled) setError(e.message);
@@ -101,14 +158,51 @@ const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn =
         })();
 
         return () => { cancelled = true; };
-    }, [published.length, hasMeta, hasLinkedIn]);
+    }, [hasMeta, hasLinkedIn, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Totals across every platform result we managed to read
-    const all = (rows || []).flatMap(r => Object.values(r.metrics || {})).filter(m => !m.unavailable);
-    const totalLikes = all.reduce((n, m) => n + (m.likes || 0), 0);
-    const totalComments = all.reduce((n, m) => n + (m.comments || 0), 0);
-    const totalShares = all.reduce((n, m) => n + (m.shares || 0), 0);
-    const avg = all.length ? Math.round((totalLikes + totalComments + totalShares) / all.length) : 0;
+    const allRows = useMemo(
+        () => [...(liveRows || []), ...linkedinRows]
+            .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt)),
+        [liveRows, linkedinRows],
+    );
+
+    const totalLikes = allRows.reduce((n, r) => n + (r.likes || 0), 0);
+    const totalComments = allRows.reduce((n, r) => n + (r.comments || 0), 0);
+    const totalShares = allRows.reduce((n, r) => n + (r.shares || 0), 0);
+    const avg = allRows.length ? Math.round((totalLikes + totalComments + totalShares) / allRows.length) : 0;
+
+    // Per-day engagement, oldest → newest, for the time chart.
+    const daily = useMemo(() => {
+        const byDay = new Map();
+        for (const row of allRows) {
+            if (!row.publishedAt) continue;
+            const d = new Date(row.publishedAt);
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            const bucket = byDay.get(key) || {
+                key,
+                day: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                likes: 0,
+                comments: 0,
+            };
+            bucket.likes += row.likes || 0;
+            bucket.comments += row.comments || 0;
+            byDay.set(key, bucket);
+        }
+        return [...byDay.values()].sort((a, b) => (a.key < b.key ? -1 : 1));
+    }, [allRows]);
+
+    // Totals per platform, for the comparison chart.
+    const byPlatform = useMemo(() => {
+        const map = new Map();
+        for (const row of allRows) {
+            const label = platformMeta(row.platform).label;
+            const bucket = map.get(label) || { platform: label, likes: 0, comments: 0 };
+            bucket.likes += row.likes || 0;
+            bucket.comments += row.comments || 0;
+            map.set(label, bucket);
+        }
+        return [...map.values()];
+    }, [allRows]);
 
     return (
         <div className="space-y-10">
@@ -134,20 +228,41 @@ const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn =
 
             {/* ── Engagement ── */}
             <div>
-                <h3 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)] mb-1">Engagement</h3>
+                <div className="flex items-center gap-3 mb-1">
+                    <h3 className="flex-1 font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)]">Engagement</h3>
+                    <button
+                        onClick={() => setReloadKey((k) => k + 1)}
+                        disabled={loading}
+                        className="p-2 rounded-xl border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--surface)] transition-colors disabled:opacity-60"
+                        title="Refresh"
+                    >
+                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                    </button>
+                </div>
                 <p className="text-sm text-[var(--muted)] mb-4">
-                    Totals across the posts you published here — the same posts listed in Post History.
+                    Live from your connected accounts — every post on your Pages and Instagram,
+                    posted through Botlance or natively.
                 </p>
 
-                {published.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-sm text-[var(--muted)]">
-                        Nothing published yet. Once a post goes out, its likes and comments appear here.
+                {feedErrors.length > 0 && (
+                    <div className="rounded-xl border px-4 py-3 mb-4 text-[12px] leading-relaxed"
+                        style={{ borderColor: 'rgba(251, 191, 36, 0.4)', background: 'rgba(251, 191, 36, 0.08)' }}>
+                        <p className="font-medium text-[var(--text)] mb-0.5">Some feeds could not be read:</p>
+                        {feedErrors.map((msg, i) => (
+                            <p key={i} className="text-[var(--muted)] break-words">{msg}</p>
+                        ))}
                     </div>
-                ) : error ? (
+                )}
+
+                {error ? (
                     <div className="rounded-2xl border border-red-300 bg-red-50 p-6 text-sm text-red-600">{error}</div>
-                ) : loading || rows === null ? (
+                ) : loading && liveRows === null ? (
                     <div className="rounded-2xl border border-[var(--border)] p-6 text-sm text-[var(--muted)]">
                         Loading engagement…
+                    </div>
+                ) : allRows.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-sm text-[var(--muted)]">
+                        No posts found on your connected accounts yet.
                     </div>
                 ) : (
                     <>
@@ -158,78 +273,49 @@ const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn =
                             <Stat icon={CheckCircle2} label="Avg per post" value={num(avg)} />
                         </div>
 
-                        {/* Per-post breakdown */}
-                        <div className="rounded-2xl border border-[var(--border)] overflow-hidden">
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm border-collapse min-w-[640px]">
-                                    <thead>
-                                        <tr className="bg-[var(--surface)]">
-                                            <th className="text-left py-3 px-5 text-xs font-normal text-[var(--muted)]">Post</th>
-                                            <th className="text-left py-3 px-3 text-xs font-normal text-[var(--muted)] w-28">Where</th>
-                                            <th className="py-3 px-3 text-xs font-normal text-[var(--muted)] w-20">Likes</th>
-                                            <th className="py-3 px-3 text-xs font-normal text-[var(--muted)] w-24">Comments</th>
-                                            <th className="py-3 px-3 text-xs font-normal text-[var(--muted)] w-20">Shares</th>
-                                            <th className="py-3 px-3 w-10"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {rows.flatMap((post, i) =>
-                                            Object.entries(post.metrics || {}).map(([platform, m], j) => {
-                                                const Icon = platformMeta(platform).Icon;
-                                                return (
-                                                    <tr key={`${post.id}-${platform}`}
-                                                        className={(i + j) > 0 ? 'border-t border-[var(--border)]' : ''}>
-                                                        <td className="py-3 px-5">
-                                                            <div className="flex items-center gap-3">
-                                                                {(m.thumbnail || post.mediaUrl) && (
-                                                                    <img src={m.thumbnail || post.mediaUrl} alt=""
-                                                                        className="w-9 h-9 rounded-lg object-cover shrink-0" />
-                                                                )}
-                                                                <span className="line-clamp-1 text-[var(--text)] max-w-xs">
-                                                                    {post.content || '—'}
-                                                                </span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="py-3 px-3">
-                                                            <span className="inline-flex items-center gap-1.5 text-[var(--muted)]">
-                                                                <Icon className="h-3.5 w-3.5" />
-                                                                {platformMeta(platform).label}
-                                                            </span>
-                                                        </td>
-                                                        {m.unavailable ? (
-                                                            <td colSpan={3} className="py-3 px-3 text-center text-xs text-[var(--muted-2)]"
-                                                                title={m.error}>
-                                                                unavailable
-                                                            </td>
-                                                        ) : (
-                                                            <>
-                                                                <td className="py-3 px-3 text-center text-[var(--text)]">{num(m.likes)}</td>
-                                                                <td className="py-3 px-3 text-center text-[var(--text)]">{num(m.comments)}</td>
-                                                                <td className="py-3 px-3 text-center text-[var(--text)]">{num(m.shares)}</td>
-                                                            </>
-                                                        )}
-                                                        <td className="py-3 px-3 text-center">
-                                                            {m.permalink && (
-                                                                <a href={m.permalink} target="_blank" rel="noopener noreferrer"
-                                                                    className="text-[var(--muted)] hover:text-[var(--accent)]"
-                                                                    title="Open on the platform">
-                                                                    <ExternalLink className="h-3.5 w-3.5 inline" />
-                                                                </a>
-                                                            )}
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })
-                                        )}
-                                    </tbody>
-                                </table>
+                        {/* ── Charts ── */}
+                        {daily.length >= 2 && (
+                            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 mb-6">
+                                <h4 className="text-sm font-semibold text-[var(--text)] mb-1">Engagement over time</h4>
+                                <p className="text-xs text-[var(--muted)] mb-3">Likes and comments received by posts published each day.</p>
+                                <ChartLegend />
+                                <ResponsiveContainer width="100%" height={240}>
+                                    <LineChart data={daily} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
+                                        <CartesianGrid vertical={false} {...gridStroke} />
+                                        <XAxis dataKey="day" tick={axisTick} axisLine={false} tickLine={false} />
+                                        <YAxis tick={axisTick} axisLine={false} tickLine={false} allowDecimals={false} />
+                                        <Tooltip content={<ChartTooltip />} cursor={{ stroke: '#777777', strokeOpacity: 0.3 }} />
+                                        <Line type="monotone" dataKey="likes" stroke={SERIES.likes.color} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                                        <Line type="monotone" dataKey="comments" stroke={SERIES.comments.color} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                                    </LineChart>
+                                </ResponsiveContainer>
                             </div>
-                        </div>
+                        )}
+
+                        {byPlatform.length >= 2 && (
+                            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 mb-6">
+                                <h4 className="text-sm font-semibold text-[var(--text)] mb-1">By platform</h4>
+                                <p className="text-xs text-[var(--muted)] mb-3">Total engagement per network across the fetched posts.</p>
+                                <ChartLegend />
+                                <ResponsiveContainer width="100%" height={220}>
+                                    <BarChart data={byPlatform} margin={{ top: 8, right: 8, bottom: 0, left: -12 }} barGap={2}>
+                                        <CartesianGrid vertical={false} {...gridStroke} />
+                                        <XAxis dataKey="platform" tick={axisTick} axisLine={false} tickLine={false} />
+                                        <YAxis tick={axisTick} axisLine={false} tickLine={false} allowDecimals={false} />
+                                        <Tooltip content={<ChartTooltip />} cursor={{ fill: '#777777', fillOpacity: 0.08 }} />
+                                        <Bar dataKey="likes" fill={SERIES.likes.color} radius={[4, 4, 0, 0]} maxBarSize={32} />
+                                        <Bar dataKey="comments" fill={SERIES.comments.color} radius={[4, 4, 0, 0]} maxBarSize={32} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        )}
 
                         <p className="text-xs text-[var(--muted-2)] mt-4 leading-relaxed">
-                            Counts come from Meta at the moment this page loaded. A post deleted on
-                            the platform shows as unavailable. Ad metrics — impressions, reach and
-                            spend — are not shown, because this app does not request ads permissions.
+                            Facebook and Instagram counts come live from Meta and include posts made
+                            natively on the platforms — the per-post breakdown lives in Post History.
+                            LinkedIn shows only posts published through Botlance, since its API does
+                            not expose a member's full history. Ad metrics are not shown, because
+                            this app does not request ads permissions.
                         </p>
                     </>
                 )}

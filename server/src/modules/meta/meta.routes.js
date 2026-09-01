@@ -906,6 +906,97 @@ router.get('/posts/history', async (req, res) => {
     }
 });
 
+// ==================== COMMENT MANAGEMENT ====================
+
+/**
+ * Every comment action needs the PAGE token for the page the post belongs
+ * to; the client sends pageId alongside, and getPageToken re-derives the
+ * token from the user token rather than trusting anything stored.
+ */
+const withPageToken = async (req, res, pageId) => {
+    if (!pageId) {
+        res.status(400).json({ error: 'pageId is required' });
+        return null;
+    }
+    const loaded = await loadConnection(req, res);
+    if (!loaded) return null;
+
+    const tokenResult = await loaded.metaService.getPageToken(pageId);
+    if (!tokenResult.success) {
+        await handleMetaError(res, req.workspaceId, tokenResult);
+        return null;
+    }
+    return { ...loaded, pageAccessToken: tokenResult.pageAccessToken };
+};
+
+/** GET /api/meta/posts/:postId/comments?pageId= */
+router.get('/posts/:postId/comments', async (req, res) => {
+    try {
+        const ctx = await withPageToken(req, res, req.query.pageId);
+        if (!ctx) return;
+
+        const result = await ctx.metaService.getPostComments(req.params.postId, ctx.pageAccessToken);
+        if (!result.success) return handleMetaError(res, req.workspaceId, result);
+
+        res.json({ success: true, comments: result.comments });
+    } catch (error) {
+        console.error('Get comments error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/** POST /api/meta/comments/:commentId/reply  { pageId, message } */
+router.post('/comments/:commentId/reply', async (req, res) => {
+    try {
+        const message = (req.body?.message || '').trim();
+        if (!message) return res.status(400).json({ error: 'A reply message is required' });
+
+        const ctx = await withPageToken(req, res, req.body?.pageId);
+        if (!ctx) return;
+
+        const result = await ctx.metaService.replyToComment(req.params.commentId, message, ctx.pageAccessToken);
+        if (!result.success) return handleMetaError(res, req.workspaceId, result);
+
+        res.status(201).json({ success: true, replyId: result.data?.id });
+    } catch (error) {
+        console.error('Reply to comment error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/** POST /api/meta/comments/:commentId/hide  { pageId, hidden } */
+router.post('/comments/:commentId/hide', async (req, res) => {
+    try {
+        const ctx = await withPageToken(req, res, req.body?.pageId);
+        if (!ctx) return;
+
+        const hidden = req.body?.hidden !== false;
+        const result = await ctx.metaService.setCommentHidden(req.params.commentId, hidden, ctx.pageAccessToken);
+        if (!result.success) return handleMetaError(res, req.workspaceId, result);
+
+        res.json({ success: true, hidden });
+    } catch (error) {
+        console.error('Hide comment error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/** DELETE /api/meta/comments/:commentId?pageId= */
+router.delete('/comments/:commentId', async (req, res) => {
+    try {
+        const ctx = await withPageToken(req, res, req.query.pageId);
+        if (!ctx) return;
+
+        const result = await ctx.metaService.deleteComment(req.params.commentId, ctx.pageAccessToken);
+        if (!result.success) return handleMetaError(res, req.workspaceId, result);
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete comment error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 /**
  * Cancel a scheduled post, or delete one that already went live.
  * DELETE /api/meta/posts/:id

@@ -52,3 +52,16 @@ export const updateStorageSettings = ({ pricePerGbMonth, deleteAfterDays }) =>
     request('/storage/settings', { method: 'PUT', body: { pricePerGbMonth, deleteAfterDays } });
 
 export const fetchStoragePurchases = () => request('/storage/purchases');
+
+export const fetchPosts = ({ page = 1, per = 20, status = '' } = {}) => {
+    const params = new URLSearchParams({ page, per });
+    if (status) params.set('status', status);
+    return request(`/posts?${params}`);
+};
+
+export const fetchPushTokens = () => request('/push-tokens');
+
+export const fetchHealth = () => request('/health');
+
+export const notifyUser = ({ userId, title, body }) =>
+    request('/notify-user', { method: 'POST', body: { userId, title, body } });

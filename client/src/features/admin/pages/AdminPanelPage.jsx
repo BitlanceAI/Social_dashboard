@@ -7,6 +7,9 @@ import OverviewPanel from '../components/OverviewPanel';
 import UsersPanel from '../components/UsersPanel';
 import ConnectionsPanel from '../components/ConnectionsPanel';
 import StoragePanel from '../components/StoragePanel';
+import PostsPanel from '../components/PostsPanel';
+import PushTokensPanel from '../components/PushTokensPanel';
+import HealthPanel from '../components/HealthPanel';
 import { fetchOverview } from '../lib/adminApi';
 
 const TITLES = {
@@ -14,6 +17,9 @@ const TITLES = {
     users: ['Users', 'Every account on the platform'],
     connections: ['Connections', 'Every linked Meta and LinkedIn account, with token health'],
     storage: ['Storage', 'Media storage pricing, retention, and purchases'],
+    posts: ['Scheduled Posts', 'The publishing queue across every user and workspace'],
+    push: ['Push Tokens', 'Devices registered for web push notifications'],
+    health: ['System Health', 'Server, database, scheduler, and integrations'],
 };
 
 /**
@@ -43,7 +49,10 @@ const AdminPanelPage = () => {
         }
     }, []);
 
-    useEffect(() => { loadOverview(); }, [loadOverview]);
+    useEffect(() => {
+        const t = setTimeout(loadOverview, 0);
+        return () => clearTimeout(t);
+    }, [loadOverview]);
 
     if (denied) {
         return (
@@ -106,6 +115,9 @@ const AdminPanelPage = () => {
                 {tab === 'users' && <UsersPanel />}
                 {tab === 'connections' && <ConnectionsPanel />}
                 {tab === 'storage' && <StoragePanel />}
+                {tab === 'posts' && <PostsPanel />}
+                {tab === 'push' && <PushTokensPanel />}
+                {tab === 'health' && <HealthPanel />}
             </main>
         </div>
     );

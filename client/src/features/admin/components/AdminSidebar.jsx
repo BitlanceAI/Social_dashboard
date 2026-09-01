@@ -9,6 +9,9 @@ import {
     Users,
     Link2,
     HardDrive,
+    CalendarClock,
+    Bell,
+    Activity,
     LogOut,
     Sun,
     Moon,
@@ -25,7 +28,10 @@ const NAV = [
     { id: 'overview', label: 'Overview', icon: LayoutGrid },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'connections', label: 'Connections', icon: Link2 },
+    { id: 'posts', label: 'Scheduled Posts', icon: CalendarClock },
     { id: 'storage', label: 'Storage', icon: HardDrive },
+    { id: 'push', label: 'Push Tokens', icon: Bell },
+    { id: 'health', label: 'System Health', icon: Activity },
 ];
 
 const itemClass = (isActive) =>

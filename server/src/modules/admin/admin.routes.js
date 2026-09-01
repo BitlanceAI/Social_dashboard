@@ -4,6 +4,7 @@ import { requireAdmin } from './admin.middleware.js';
 import {
     getOverview, getUsers, createUser, getConnections,
     getStorageSettings, updateStorageSettings, getStoragePurchases,
+    getPosts, getPushTokens, getHealth, notifyUser,
 } from './admin.controller.js';
 
 const router = express.Router();
@@ -18,5 +19,9 @@ router.get('/connections', getConnections);
 router.get('/storage/settings', getStorageSettings);
 router.put('/storage/settings', updateStorageSettings);
 router.get('/storage/purchases', getStoragePurchases);
+router.get('/posts', getPosts);
+router.get('/push-tokens', getPushTokens);
+router.get('/health', getHealth);
+router.post('/notify-user', notifyUser);
 
 export default router;

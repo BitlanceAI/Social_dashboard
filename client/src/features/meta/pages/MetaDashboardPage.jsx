@@ -60,6 +60,7 @@ import {
 import API_BASE_URL from '@/shared/config';
 
 import DashboardSidebar, { DashboardMobileNav } from '@/features/meta/components/DashboardSidebar';
+import CommentsModal from '@/features/meta/components/CommentsModal';
 
 const MetaDashboardView = () => {
     const navigate = useNavigate();
@@ -368,7 +369,10 @@ const MetaDashboardView = () => {
     // accounts, made through this app or not). Loaded lazily when the
     // History tab first opens; null = not fetched yet.
     const [platformHistory, setPlatformHistory] = useState(null);
+    const [historyFeedErrors, setHistoryFeedErrors] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(false);
+    // Facebook post whose comment thread is open in the manager modal
+    const [commentsPost, setCommentsPost] = useState(null);
 
     const loadPlatformHistory = async () => {
         setHistoryLoading(true);
@@ -378,7 +382,10 @@ const MetaDashboardView = () => {
             });
             const data = await response.json();
             if (handleAuthError(response.status, data)) return;
-            if (data.success) setPlatformHistory(data.posts || []);
+            if (data.success) {
+                setPlatformHistory(data.posts || []);
+                setHistoryFeedErrors(data.feedErrors || []);
+            }
         } catch (error) {
             console.error('Failed to load platform history:', error);
         } finally {
@@ -939,6 +946,21 @@ const MetaDashboardView = () => {
                             whether it was posted through Botlance or natively.
                         </p>
 
+                        {/* One feed failing must be visible, not silent — this is
+                            how "only Instagram shows up" gets diagnosed. */}
+                        {historyFeedErrors.length > 0 && (
+                            <div className="flex items-start gap-2.5 rounded-xl border px-4 py-3 mb-4"
+                                style={{ borderColor: 'rgba(251, 191, 36, 0.4)', background: 'rgba(251, 191, 36, 0.08)' }}>
+                                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" style={{ color: '#FBBF24' }} />
+                                <div className="text-[12px] text-[var(--text)] leading-relaxed min-w-0">
+                                    <p className="font-medium mb-0.5">Some feeds could not be read:</p>
+                                    {historyFeedErrors.map((msg, i) => (
+                                        <p key={i} className="text-[var(--muted)] break-words">{msg}</p>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
                         {historyLoading && platformHistory === null ? (
                             <div className="py-10 text-center text-sm text-[var(--muted)]">Loading your posts…</div>
                         ) : !platformHistory?.length ? (
@@ -976,7 +998,17 @@ const MetaDashboardView = () => {
                                                     </span>
                                                     <span>{new Date(post.publishedAt).toLocaleString()}</span>
                                                     {post.likes !== null && <span>· {post.likes} likes</span>}
-                                                    {post.comments !== null && <span>· {post.comments} comments</span>}
+                                                    {post.platform === 'facebook' ? (
+                                                        <button
+                                                            onClick={() => setCommentsPost(post)}
+                                                            className="text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                                                            title="Read, reply to, hide or delete comments as your Page"
+                                                        >
+                                                            · {post.comments ?? 0} comments →
+                                                        </button>
+                                                    ) : (
+                                                        post.comments !== null && <span>· {post.comments} comments</span>
+                                                    )}
                                                     {post.permalink && (
                                                         <a
                                                             href={post.permalink}
@@ -1125,6 +1157,14 @@ const MetaDashboardView = () => {
             </div>
 
             </div>{/* end sidebar + content layout */}
+
+            {commentsPost && (
+                <CommentsModal
+                    post={commentsPost}
+                    authHeaders={getAuthHeaders}
+                    onClose={() => setCommentsPost(null)}
+                />
+            )}
 
             <DashboardMobileNav
                 active={activeTab}

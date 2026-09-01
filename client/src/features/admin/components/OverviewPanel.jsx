@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { notifyUser } from '../lib/adminApi';
 import StatusChip from './StatusChip';
 
 const Card = ({ children, className = '' }) => (
@@ -27,6 +29,25 @@ const fmtDateTime = (iso) =>
  */
 const OverviewPanel = ({ data, onOpenConnections }) => {
     const { stats, expiringTokens, recentActivity } = data;
+    const [notifying, setNotifying] = useState({}); // userId -> in flight
+
+    // One-click reconnect nudge, delivered over web push.
+    const handleNotify = async (t) => {
+        if (notifying[t.userId]) return;
+        setNotifying((n) => ({ ...n, [t.userId]: true }));
+        try {
+            const res = await notifyUser({
+                userId: t.userId,
+                title: 'Your LinkedIn connection is about to expire',
+                body: `It lapses in ${t.daysLeft} day${t.daysLeft === 1 ? '' : 's'} and cannot be renewed automatically — reconnect to keep your posts publishing.`,
+            });
+            toast.success(res.message);
+        } catch (err) {
+            toast.error(err.message || 'Could not notify');
+        } finally {
+            setNotifying((n) => ({ ...n, [t.userId]: false }));
+        }
+    };
 
     return (
         <div className="space-y-6">
@@ -87,6 +108,13 @@ const OverviewPanel = ({ data, onOpenConnections }) => {
                                 >
                                     expires in {t.daysLeft} day{t.daysLeft === 1 ? '' : 's'}
                                 </span>
+                                <button
+                                    onClick={() => handleNotify(t)}
+                                    disabled={notifying[t.userId]}
+                                    className="btn-primary shrink-0 rounded-lg px-3 py-1.5 text-xs disabled:opacity-60"
+                                >
+                                    {notifying[t.userId] ? 'Sending…' : 'Notify'}
+                                </button>
                             </div>
                         ))}
                     </div>

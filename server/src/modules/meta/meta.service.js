@@ -146,28 +146,43 @@ class MetaService {
      */
     async getPageFeed(pageId, pageName, pageAccessToken, limit = 25) {
         const pageApi = new MetaService(pageAccessToken);
-        const result = await pageApi.request('GET', `/${pageId}/published_posts`, {}, {
-            fields: 'id,message,created_time,permalink_url,full_picture,likes.summary(true).limit(0),comments.summary(true).limit(0),shares',
-            limit,
-        });
-        if (!result.success) return result;
 
-        return {
-            success: true,
-            posts: (result.data.data || []).map((p) => ({
-                id: p.id,
-                platform: 'facebook',
-                pageId,
-                pageName,
-                message: p.message || '',
-                mediaUrl: p.full_picture || null,
-                permalink: p.permalink_url || null,
-                publishedAt: p.created_time,
-                likes: p.likes?.summary?.total_count ?? null,
-                comments: p.comments?.summary?.total_count ?? null,
-                shares: p.shares?.count ?? null,
-            })),
-        };
+        // published_posts + likes first; some Page types reject one or the
+        // other, so fall back to the feed edge with the modern reactions field
+        // rather than losing the whole Page from history.
+        const attempts = [
+            ['published_posts', 'id,message,created_time,permalink_url,full_picture,likes.summary(true).limit(0),comments.summary(true).limit(0),shares'],
+            ['feed', 'id,message,created_time,permalink_url,full_picture,reactions.summary(true).limit(0),comments.summary(true).limit(0),shares'],
+        ];
+
+        let lastError = null;
+        for (const [edge, fields] of attempts) {
+            const result = await pageApi.request('GET', `/${pageId}/${edge}`, {}, { fields, limit });
+            if (result.success) {
+                return {
+                    success: true,
+                    posts: (result.data.data || []).map((p) => ({
+                        id: p.id,
+                        platform: 'facebook',
+                        pageId,
+                        pageName,
+                        message: p.message || '',
+                        mediaUrl: p.full_picture || null,
+                        permalink: p.permalink_url || null,
+                        publishedAt: p.created_time,
+                        likes: p.likes?.summary?.total_count
+                            ?? p.reactions?.summary?.total_count
+                            ?? null,
+                        comments: p.comments?.summary?.total_count ?? null,
+                        shares: p.shares?.count ?? null,
+                    })),
+                };
+            }
+            lastError = result;
+        }
+        // Name the page in the error so a multi-page setup can tell which
+        // feed failed and why.
+        return { ...lastError, error: `${pageName}: ${lastError.error}` };
     }
 
     /** All media on a linked Instagram Business account, same page token. */
@@ -195,6 +210,55 @@ class MetaService {
                 shares: null,
             })),
         };
+    }
+
+    // ==================== COMMENT MANAGEMENT (pages_manage_engagement) ====================
+
+    /** Comments on a Page post, newest first. Reads with the PAGE token. */
+    async getPostComments(postId, pageAccessToken, limit = 50) {
+        const pageApi = new MetaService(pageAccessToken);
+        const result = await pageApi.request('GET', `/${postId}/comments`, {}, {
+            fields: 'id,message,created_time,from{name,id,picture},like_count,comment_count,is_hidden,can_hide,can_remove',
+            order: 'reverse_chronological',
+            // Hidden comments stay visible to the admin, so they can unhide.
+            filter: 'stream',
+            limit,
+        });
+        if (!result.success) return result;
+
+        return {
+            success: true,
+            comments: (result.data.data || []).map((c) => ({
+                id: c.id,
+                message: c.message || '',
+                createdAt: c.created_time,
+                authorName: c.from?.name || 'Facebook user',
+                authorPicture: c.from?.picture?.data?.url || null,
+                likeCount: c.like_count ?? 0,
+                replyCount: c.comment_count ?? 0,
+                isHidden: Boolean(c.is_hidden),
+                canHide: c.can_hide !== false,
+                canRemove: c.can_remove !== false,
+            })),
+        };
+    }
+
+    /** Reply to a comment as the Page. */
+    async replyToComment(commentId, message, pageAccessToken) {
+        const pageApi = new MetaService(pageAccessToken);
+        return pageApi.request('POST', `/${commentId}/comments`, { message });
+    }
+
+    /** Hide or unhide a comment on the Page's post. */
+    async setCommentHidden(commentId, hidden, pageAccessToken) {
+        const pageApi = new MetaService(pageAccessToken);
+        return pageApi.request('POST', `/${commentId}`, { is_hidden: Boolean(hidden) });
+    }
+
+    /** Permanently delete a comment from the Page's post. */
+    async deleteComment(commentId, pageAccessToken) {
+        const pageApi = new MetaService(pageAccessToken);
+        return pageApi.request('DELETE', `/${commentId}`);
     }
 
     // ==================== FACEBOOK PAGE POST METHODS ====================
@@ -542,8 +606,9 @@ class MetaService {
         // until those features exist.
         return [
             'pages_show_list',          // list Pages -> find linked IG account
-            'pages_read_engagement',    // read Page fields
+            'pages_read_engagement',    // read Page fields + post comments
             'pages_manage_posts',       // publish to a Facebook Page
+            'pages_manage_engagement',  // reply to / hide / delete comments as the Page
             'instagram_basic',          // read IG profile + media
             'instagram_content_publish' // publish to IG Business account
         ];

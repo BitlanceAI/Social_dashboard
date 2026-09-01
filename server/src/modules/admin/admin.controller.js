@@ -430,3 +430,152 @@ export const getStoragePurchases = async (req, res) => {
         res.status(500).json({ success: false, error: 'Failed to load storage purchases' });
     }
 };
+
+/**
+ * GET /api/admin/posts?status=&page=1&per=20
+ * The platform-wide publishing queue, any user, any workspace.
+ */
+export const getPosts = async (req, res) => {
+    try {
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const per = Math.min(50, Math.max(1, parseInt(req.query.per, 10) || 20));
+        const from = (page - 1) * per;
+        const statuses = ['pending', 'processing', 'published', 'failed', 'cancelled'];
+        const status = statuses.includes(req.query.status) ? req.query.status : null;
+
+        let query = supabaseAdmin
+            .from('scheduled_posts')
+            .select('id, user_id, page_name, provider, platforms, content, status, scheduled_time, published_at, error_message', { count: 'exact' })
+            .order('scheduled_time', { ascending: false })
+            .range(from, from + per - 1);
+        if (status) query = query.eq('status', status);
+
+        const { data, count, error } = await query;
+        if (error) throw error;
+
+        const userMap = await usersById((data || []).map((p) => p.user_id));
+        res.json({
+            success: true,
+            page,
+            per,
+            total: count ?? 0,
+            posts: (data || []).map((p) => ({
+                ...p,
+                userName: userMap[p.user_id]?.name || 'Unknown',
+                userEmail: userMap[p.user_id]?.email || null,
+            })),
+        });
+    } catch (err) {
+        console.error('[admin] posts failed:', err);
+        res.status(500).json({ success: false, error: 'Failed to load posts' });
+    }
+};
+
+/** GET /api/admin/push-tokens — every registered web-push device. */
+export const getPushTokens = async (req, res) => {
+    try {
+        const { data, error } = await supabaseAdmin
+            .from('push_tokens')
+            .select('id, user_id, user_agent, created_at, last_used_at')
+            .order('created_at', { ascending: false })
+            .limit(200);
+        if (error) throw error;
+
+        const userMap = await usersById((data || []).map((t) => t.user_id));
+        res.json({
+            success: true,
+            tokens: (data || []).map((t) => ({
+                id: t.id,
+                userName: userMap[t.user_id]?.name || 'Unknown',
+                userEmail: userMap[t.user_id]?.email || null,
+                userAgent: t.user_agent,
+                createdAt: t.created_at,
+                lastUsedAt: t.last_used_at,
+            })),
+        });
+    } catch (err) {
+        console.error('[admin] push tokens failed:', err);
+        res.status(500).json({ success: false, error: 'Failed to load push tokens' });
+    }
+};
+
+/**
+ * GET /api/admin/health — liveness of the pieces the platform depends on.
+ * The scheduler runs in-process on a fixed interval; there is no pause/run
+ * control here because none exists in the scheduler itself.
+ */
+export const getHealth = async (req, res) => {
+    try {
+        const now = Date.now();
+        const dayAgo = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+
+        const dbStart = Date.now();
+        const [pendingDue, processing, failed24h] = await Promise.all([
+            supabaseAdmin.from('scheduled_posts').select('id', { count: 'exact', head: true })
+                .eq('status', 'pending').lte('scheduled_time', new Date(now).toISOString()),
+            supabaseAdmin.from('scheduled_posts').select('id', { count: 'exact', head: true })
+                .eq('status', 'processing'),
+            supabaseAdmin.from('scheduled_posts').select('id', { count: 'exact', head: true })
+                .eq('status', 'failed').gte('updated_at', dayAgo),
+        ]);
+        const dbLatencyMs = Date.now() - dbStart;
+        const dbError = [pendingDue, processing, failed24h].find((r) => r.error)?.error;
+
+        res.json({
+            success: true,
+            server: {
+                uptimeSeconds: Math.floor(process.uptime()),
+                node: process.version,
+                env: process.env.NODE_ENV || 'development',
+            },
+            database: {
+                ok: !dbError,
+                latencyMs: dbLatencyMs,
+                error: dbError?.message || null,
+            },
+            scheduler: {
+                intervalSeconds: 60,
+                dueNow: pendingDue.count ?? 0,
+                processing: processing.count ?? 0,
+                failedLast24h: failed24h.count ?? 0,
+            },
+            integrations: {
+                razorpay: storageService.isConfigured(),
+                push: Boolean(process.env.FIREBASE_PROJECT_ID || process.env.FIREBASE_SERVICE_ACCOUNT),
+                bunny: Boolean(process.env.BUNNY_STORAGE_ZONE && (process.env.BUNNY_API_KEY || process.env.BUNNY_STORAGE_API_KEY)),
+                linkedin: Boolean(process.env.LINKEDIN_CLIENT_ID),
+                meta: Boolean(process.env.META_APP_ID),
+            },
+        });
+    } catch (err) {
+        console.error('[admin] health failed:', err);
+        res.status(500).json({ success: false, error: 'Failed to load health' });
+    }
+};
+
+/**
+ * POST /api/admin/notify-user  { userId, title, body }
+ * Web-push nudge to one user — the Overview's "Notify" action for
+ * expiring LinkedIn tokens uses it with a canned reconnect message.
+ */
+export const notifyUser = async (req, res) => {
+    try {
+        const { userId, title, body } = req.body || {};
+        if (!userId || !title || !body) {
+            return res.status(400).json({ success: false, error: 'userId, title and body are required' });
+        }
+        const { sendToUser } = await import('../push/push.service.js');
+        const result = await sendToUser(userId, { title, body, url: '/socialdashboad' });
+        if (result.skipped) {
+            return res.status(503).json({ success: false, error: 'Push is not configured on the server' });
+        }
+        res.json({
+            success: true,
+            sent: result.sent,
+            message: result.sent > 0 ? `Notified ${result.sent} device${result.sent === 1 ? '' : 's'}` : 'That user has no push-enabled devices',
+        });
+    } catch (err) {
+        console.error('[admin] notify failed:', err);
+        res.status(500).json({ success: false, error: 'Failed to send the notification' });
+    }
+};

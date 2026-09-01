@@ -44,7 +44,10 @@ const ConnectionsPanel = () => {
         }
     }, []);
 
-    useEffect(() => { load(provider); }, [provider, load]);
+    useEffect(() => {
+        const t = setTimeout(() => load(provider), 0);
+        return () => clearTimeout(t);
+    }, [provider, load]);
 
     const tabClass = (id) =>
         `text-sm px-4 py-1.5 rounded-lg transition-colors ${

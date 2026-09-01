@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, RefreshCw, UserPlus } from 'lucide-react';
+import { Search, RefreshCw, UserPlus, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fetchUsers } from '../lib/adminApi';
 import StatusChip from './StatusChip';
@@ -22,6 +22,44 @@ const UsersPanel = () => {
     const [search, setSearch] = useState('');
     const [loading, setLoading] = useState(true);
     const [showAddUser, setShowAddUser] = useState(false);
+    const [exporting, setExporting] = useState(false);
+
+    // Walks every page of the current search and hands back one CSV file.
+    const handleExport = async () => {
+        if (exporting) return;
+        setExporting(true);
+        try {
+            const rows = [];
+            let p = 1;
+            for (;;) {
+                const res = await fetchUsers({ page: p, per: 50, search });
+                rows.push(...res.users);
+                if (rows.length >= res.total || res.users.length === 0) break;
+                p += 1;
+            }
+            const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+            const csv = [
+                ['Name', 'Email', 'Role', 'Connections', 'Posts', 'Joined', 'Status'].join(','),
+                ...rows.map((u) => [
+                    esc(u.name), esc(u.email), esc(u.role), esc(u.providers.join(' ')),
+                    u.postCount, esc(u.createdAt), esc(u.status),
+                ].join(',')),
+            ].join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `users-${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+            toast.success(`Exported ${rows.length} users`);
+        } catch (err) {
+            toast.error(err.message || 'Export failed');
+        } finally {
+            setExporting(false);
+        }
+    };
 
     const load = useCallback(async (nextPage, nextSearch) => {
         setLoading(true);
@@ -67,6 +105,14 @@ const UsersPanel = () => {
                     <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                 </button>
                 <div className="flex-1" />
+                <button
+                    onClick={handleExport}
+                    disabled={exporting}
+                    className="flex items-center gap-2 rounded-xl border border-[var(--border)] px-4 py-2 text-sm text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--surface)] transition-colors disabled:opacity-60"
+                >
+                    <Download className="h-4 w-4" />
+                    {exporting ? 'Exporting…' : 'Export CSV'}
+                </button>
                 <button
                     onClick={() => setShowAddUser(true)}
                     className="btn-primary flex items-center gap-2 rounded-xl px-4 py-2 text-sm"
