@@ -167,42 +167,62 @@ class MetaService {
     async getPageFeed(pageId, pageName, pageAccessToken, limit = 25) {
         const pageApi = new MetaService(pageAccessToken);
 
-        // published_posts + likes first; some Page types reject one or the
-        // other, so fall back to the feed edge with the modern reactions field
-        // rather than losing the whole Page from history.
-        const attempts = [
-            ['published_posts', 'id,message,created_time,permalink_url,full_picture,likes.summary(true).limit(0),comments.summary(true).limit(0),shares'],
-            ['feed', 'id,message,created_time,permalink_url,full_picture,reactions.summary(true).limit(0),comments.summary(true).limit(0),shares'],
-        ];
+        // BASIC post fields read fine with Page access. The engagement summary
+        // (likes/comments counts) is what specifically needs
+        // pages_read_engagement — bundling it into the same request makes the
+        // WHOLE call fail when that permission isn't fully granted. So request
+        // basic fields first (the posts always load), then TRY to enrich with
+        // engagement and degrade to null counts if that part is denied.
+        const BASIC = 'id,message,created_time,permalink_url,full_picture';
+        const ENGAGEMENT = 'likes.summary(true).limit(0),comments.summary(true).limit(0),shares';
 
+        // Get the posts themselves (basic) — try each edge until one works.
+        let basic = null;
         let lastError = null;
-        for (const [edge, fields] of attempts) {
-            const result = await pageApi.request('GET', `/${pageId}/${edge}`, {}, { fields, limit });
-            if (result.success) {
-                return {
-                    success: true,
-                    posts: (result.data.data || []).map((p) => ({
-                        id: p.id,
-                        platform: 'facebook',
-                        pageId,
-                        pageName,
-                        message: p.message || '',
-                        mediaUrl: p.full_picture || null,
-                        permalink: p.permalink_url || null,
-                        publishedAt: p.created_time,
-                        likes: p.likes?.summary?.total_count
-                            ?? p.reactions?.summary?.total_count
-                            ?? null,
-                        comments: p.comments?.summary?.total_count ?? null,
-                        shares: p.shares?.count ?? null,
-                    })),
-                };
-            }
+        for (const edge of ['posts', 'published_posts', 'feed']) {
+            const result = await pageApi.request('GET', `/${pageId}/${edge}`, {}, { fields: BASIC, limit });
+            if (result.success) { basic = result.data.data || []; break; }
             lastError = result;
         }
-        // Name the page in the error so a multi-page setup can tell which
-        // feed failed and why.
-        return { ...lastError, error: `${pageName}: ${lastError.error}` };
+        if (basic === null) {
+            return { ...lastError, error: `${pageName}: ${lastError?.error || 'could not read posts'}` };
+        }
+
+        // Best-effort engagement enrichment, keyed by post id. If this fails
+        // (permission pending review), posts still return with null counts.
+        const engagementById = {};
+        const enrich = await pageApi.request('GET', `/${pageId}/posts`, {}, {
+            fields: `id,${ENGAGEMENT}`,
+            limit,
+        });
+        if (enrich.success) {
+            for (const p of enrich.data.data || []) {
+                engagementById[p.id] = {
+                    likes: p.likes?.summary?.total_count ?? null,
+                    comments: p.comments?.summary?.total_count ?? null,
+                    shares: p.shares?.count ?? null,
+                };
+            }
+        } else {
+            console.warn(`[Meta] ${pageName}: engagement counts unavailable (${enrich.error})`);
+        }
+
+        return {
+            success: true,
+            posts: basic.map((p) => ({
+                id: p.id,
+                platform: 'facebook',
+                pageId,
+                pageName,
+                message: p.message || '',
+                mediaUrl: p.full_picture || null,
+                permalink: p.permalink_url || null,
+                publishedAt: p.created_time,
+                likes: engagementById[p.id]?.likes ?? null,
+                comments: engagementById[p.id]?.comments ?? null,
+                shares: engagementById[p.id]?.shares ?? null,
+            })),
+        };
     }
 
     /** All media on a linked Instagram Business account, same page token. */
@@ -649,7 +669,13 @@ class MetaService {
             redirect_uri: redirectUri,
             scope: scopes.join(','),
             response_type: 'code',
-            state: state || generateState()
+            state: state || generateState(),
+            // Force Facebook to re-prompt for any permission not already
+            // granted, instead of silently replaying the prior grant. Without
+            // this, a user whose first connection lacked (or declined)
+            // pages_read_engagement keeps getting a scope-less token on every
+            // reconnect — the "Continue as…" shortcut skips new permissions.
+            auth_type: 'rerequest'
         });
 
         return `https://www.facebook.com/${META_API_VERSION}/dialog/oauth?${params.toString()}`;

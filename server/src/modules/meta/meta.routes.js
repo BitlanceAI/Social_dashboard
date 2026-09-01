@@ -243,6 +243,15 @@ router.post('/connect-api-key', async (req, res) => {
             return res.status(400).json({ error: 'Invalid access token' });
         }
 
+        // Print exactly what this token can do. If 'pages_read_engagement' is
+        // NOT in this list, that is the whole reason feed/posts reads fail with
+        // code 10 — the fix is a fresh reconnect that grants it, not any code
+        // change here.
+        console.log('🔑 [Meta Connect] Granted scopes:', (validation.scopes || []).join(', ') || '(none)');
+        if (!(validation.scopes || []).includes('pages_read_engagement')) {
+            console.warn('⚠️  [Meta Connect] pages_read_engagement is MISSING from this token — Post History / Analytics will return code 10 until the user reconnects and grants it.');
+        }
+
         const profile = await metaService.getMe();
         if (!profile.success) {
             return res.status(400).json({ error: 'Failed to fetch Meta profile' });
@@ -889,6 +898,12 @@ router.get('/posts/history', async (req, res) => {
     try {
         const loaded = await loadConnection(req, res);
         if (!loaded) return;
+
+        // Diagnostic: prove what the STORED token (used for reads) actually
+        // carries. If pages_read_engagement is absent here, the connection row
+        // is older than the last reconnect — the read token is stale.
+        const readValidation = await loaded.metaService.validateToken();
+        console.log('🔎 [Meta History] Read token scopes:', (readValidation.scopes || []).join(', ') || '(none)');
 
         const perFeedLimit = Math.min(50, parseInt(req.query.limit, 10) || 25);
 

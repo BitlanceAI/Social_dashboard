@@ -62,6 +62,11 @@ import API_BASE_URL from '@/shared/config';
 import DashboardSidebar, { DashboardMobileNav } from '@/features/meta/components/DashboardSidebar';
 import CommentsModal from '@/features/meta/components/CommentsModal';
 
+// Module-scoped, so it survives the StrictMode/dev remount that resets a ref.
+// One OAuth token is completed exactly once, no matter how many times the
+// effect or auth-state handler re-fires it — kills the duplicate connect toast.
+const processedOAuthTokens = new Set();
+
 const MetaDashboardView = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
@@ -371,6 +376,7 @@ const MetaDashboardView = () => {
     const [platformHistory, setPlatformHistory] = useState(null);
     const [historyFeedErrors, setHistoryFeedErrors] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyPlatform, setHistoryPlatform] = useState('all'); // all | facebook | instagram
     // Facebook post whose comment thread is open in the manager modal
     const [commentsPost, setCommentsPost] = useState(null);
 
@@ -455,6 +461,15 @@ const MetaDashboardView = () => {
     };
 
     const handleOAuthComplete = async (providerToken, authToken) => {
+        // Dedup by token at module scope: two callers (the auth-state handler
+        // and the URL-param effect), plus StrictMode's dev remount, otherwise
+        // fire this two+ times and post two "connected" toasts. A ref resets
+        // on remount; this Set does not.
+        if (!providerToken || processedOAuthTokens.has(providerToken)) {
+            return;
+        }
+        processedOAuthTokens.add(providerToken);
+
         setConnecting(true);
         // Store token in ref for immediate synchronous access
         if (authToken) authTokenRef.current = authToken;
@@ -479,6 +494,8 @@ const MetaDashboardView = () => {
         } catch (error) {
             console.error('OAuth completion error:', error);
             toast.error('OAuth completion failed');
+            // Let a genuine failure be retried with the same token.
+            processedOAuthTokens.delete(providerToken);
         } finally {
             setConnecting(false);
         }
@@ -959,6 +976,34 @@ const MetaDashboardView = () => {
                             whether it was posted through Botlance or natively.
                         </p>
 
+                        {/* Platform filter — counts come from the loaded set */}
+                        {platformHistory?.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-2 mb-4">
+                                {[
+                                    { id: 'all', label: 'All' },
+                                    { id: 'facebook', label: 'Facebook' },
+                                    { id: 'instagram', label: 'Instagram' },
+                                ].map(({ id, label }) => {
+                                    const n = id === 'all'
+                                        ? platformHistory.length
+                                        : platformHistory.filter(p => p.platform === id).length;
+                                    return (
+                                        <button
+                                            key={id}
+                                            onClick={() => setHistoryPlatform(id)}
+                                            className={`text-[11px] font-mono px-3 py-1.5 rounded-full transition-colors ${
+                                                historyPlatform === id
+                                                    ? 'bg-[var(--accent)]/15 text-[var(--accent)]'
+                                                    : 'border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]'
+                                            }`}
+                                        >
+                                            {label} · {n}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+
                         {/* One feed failing must be visible, not silent — this is
                             how "only Instagram shows up" gets diagnosed. */}
                         {historyFeedErrors.length > 0 && (
@@ -985,7 +1030,12 @@ const MetaDashboardView = () => {
                             </div>
                         ) : (
                             <div className="space-y-3">
-                                {platformHistory.map(post => {
+                                {platformHistory.filter(p => historyPlatform === 'all' || p.platform === historyPlatform).length === 0 && (
+                                    <p className="py-8 text-center text-sm text-[var(--muted)]">
+                                        No {historyPlatform} posts.
+                                    </p>
+                                )}
+                                {platformHistory.filter(p => historyPlatform === 'all' || p.platform === historyPlatform).map(post => {
                                     const Icon = platformMeta(post.platform).Icon;
                                     return (
                                         <div
