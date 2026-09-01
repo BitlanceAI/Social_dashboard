@@ -122,6 +122,31 @@ const purgeMetaUser = async (metaUserId) => {
 };
 
 /**
+ * debug_token dominates this app's Meta rate-limit budget (it runs on every
+ * dashboard load via /connection), so its result is cached for a few minutes
+ * per connection. Staleness is harmless: a token revoked mid-window fails the
+ * next real Graph call with code 190, which deactivates the connection via
+ * handleMetaError anyway. The cache keys on updated_at so a reconnect (new
+ * token, fresh scopes) bypasses the old entry immediately.
+ */
+const TOKEN_VALIDATION_TTL_MS = 10 * 60 * 1000;
+const tokenValidationCache = new Map(); // connection id -> { key, result, at }
+
+const validateTokenCached = async (connectionId, updatedAt, metaService) => {
+    const key = String(updatedAt);
+    const hit = tokenValidationCache.get(connectionId);
+    if (hit && hit.key === key && Date.now() - hit.at < TOKEN_VALIDATION_TTL_MS) {
+        return hit.result;
+    }
+    const result = await metaService.validateToken();
+    // Cache only definitive answers; a transient failure should retry.
+    if (result.success !== false) {
+        tokenValidationCache.set(connectionId, { key, result, at: Date.now() });
+    }
+    return result;
+};
+
+/**
  * Load the caller's active Meta connection and decrypt its access token.
  * Returns null (after responding) when there is nothing usable.
  */
@@ -378,7 +403,7 @@ router.get('/connection', async (req, res) => {
 
         const decryptedToken = decryptData(connection.access_token);
         const metaService = new MetaService(decryptedToken);
-        const validation = await metaService.validateToken();
+        const validation = await validateTokenCached(connection.id, connection.updated_at, metaService);
 
         const allPages = connection.pages || [];
         const selectedIds = connection.selected_page_ids;
