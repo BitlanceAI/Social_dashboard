@@ -96,7 +96,9 @@ const SignupPage = () => {
                 console.error('Webhook error:', webhookError);
             }
 
-            setSuccess('Account created! Please check your email and click the verification link before logging in.');
+            // Email confirmation is disabled for this project, so the account
+            // is usable immediately — no "check your inbox" theater.
+            setSuccess('Account created! You can log in now.');
 
             if (formData.phone) {
                 setTimeout(() => {

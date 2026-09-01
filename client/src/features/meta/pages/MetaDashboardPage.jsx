@@ -880,6 +880,15 @@ const MetaDashboardView = () => {
                             required: connection.requiredScopes || [],
                         } : null}
                         instagramAccounts={connection?.instagramAccounts || []}
+                        hiddenInstagram={
+                            (connection?.availablePages || [])
+                                .filter((p) => p.instagram_business_account?.id
+                                    && !(connection.selectedPageIds || []).map(String).includes(String(p.id)))
+                                .map((p) => ({
+                                    username: p.instagram_business_account.username,
+                                    pageName: p.name,
+                                }))
+                        }
                         linkedinConnection={liConnection}
                         postCounts={postCounts}
                         onAddProfile={() => setShowConnectModal(true)}
