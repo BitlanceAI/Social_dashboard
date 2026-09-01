@@ -16,6 +16,7 @@ const SocialProfilesPanel = ({
     loading,
     isConnected,
     targets = [],
+    instagramAccounts = [],
     linkedinConnection,
     postCounts = {},
     onAddProfile,
@@ -185,6 +186,61 @@ const SocialProfilesPanel = ({
                                 >
                                     <LogOut className="h-4 w-4" />
                                 </button>
+                            </div>
+                        );
+                    })}
+
+                    {/* Linked Instagram Business accounts, one visible card
+                        each. They ride on a Page's connection, so there is no
+                        per-card disconnect — unlinking happens on Facebook. */}
+                    {instagramAccounts.map((ig) => {
+                        const igMeta = platformMeta('instagram');
+                        return (
+                            <div
+                                key={`ig-${ig.id}`}
+                                className="flex items-center gap-4 p-5 rounded-3xl border border-[var(--border)] bg-[var(--surface)]"
+                            >
+                                <div className="relative shrink-0">
+                                    {ig.profile_picture_url ? (
+                                        <img
+                                            src={ig.profile_picture_url}
+                                            alt=""
+                                            className="w-14 h-14 rounded-2xl object-cover border border-[var(--border)]"
+                                        />
+                                    ) : (
+                                        <div className="w-14 h-14 rounded-2xl border border-[var(--border)] bg-[var(--bg)] flex items-center justify-center">
+                                            <span className="font-['Space_Grotesk'] text-xl font-extrabold text-[var(--muted)]">
+                                                {initialOf(ig.username)}
+                                            </span>
+                                        </div>
+                                    )}
+                                    <span
+                                        className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center border-2 border-[var(--surface)]"
+                                        style={{ backgroundColor: igMeta.brand }}
+                                    >
+                                        <igMeta.Icon className="h-3 w-3 text-white" />
+                                    </span>
+                                </div>
+
+                                <div className="min-w-0 flex-1">
+                                    <p className="font-['Space_Grotesk'] text-base font-extrabold tracking-tight text-[var(--text)] truncate">
+                                        @{ig.username || 'instagram'}
+                                    </p>
+                                    <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--muted)] mt-0.5">
+                                        Instagram Business · via {ig.pageName}
+                                    </p>
+                                    <div className="flex items-center gap-3 mt-2">
+                                        {typeof ig.followers_count === 'number' && (
+                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--border)] text-[11px] text-[var(--muted)]">
+                                                {ig.followers_count.toLocaleString()} followers
+                                            </span>
+                                        )}
+                                        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-[var(--accent)]">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />
+                                            Active
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
                         );
                     })}

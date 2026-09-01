@@ -137,6 +137,66 @@ class MetaService {
         return { success: true, page, pageAccessToken: page.access_token };
     }
 
+    // ==================== POST HISTORY (live, from the platform) ====================
+
+    /**
+     * Every published post on a Page — including posts made natively on
+     * Facebook, not just ones created through this app. Reads with the PAGE
+     * token (published_posts requires it).
+     */
+    async getPageFeed(pageId, pageName, pageAccessToken, limit = 25) {
+        const pageApi = new MetaService(pageAccessToken);
+        const result = await pageApi.request('GET', `/${pageId}/published_posts`, {}, {
+            fields: 'id,message,created_time,permalink_url,full_picture,likes.summary(true).limit(0),comments.summary(true).limit(0),shares',
+            limit,
+        });
+        if (!result.success) return result;
+
+        return {
+            success: true,
+            posts: (result.data.data || []).map((p) => ({
+                id: p.id,
+                platform: 'facebook',
+                pageId,
+                pageName,
+                message: p.message || '',
+                mediaUrl: p.full_picture || null,
+                permalink: p.permalink_url || null,
+                publishedAt: p.created_time,
+                likes: p.likes?.summary?.total_count ?? null,
+                comments: p.comments?.summary?.total_count ?? null,
+                shares: p.shares?.count ?? null,
+            })),
+        };
+    }
+
+    /** All media on a linked Instagram Business account, same page token. */
+    async getInstagramFeed(igUserId, igUsername, pageAccessToken, limit = 25) {
+        const pageApi = new MetaService(pageAccessToken);
+        const result = await pageApi.request('GET', `/${igUserId}/media`, {}, {
+            fields: 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
+            limit,
+        });
+        if (!result.success) return result;
+
+        return {
+            success: true,
+            posts: (result.data.data || []).map((m) => ({
+                id: m.id,
+                platform: 'instagram',
+                pageId: igUserId,
+                pageName: igUsername ? `@${igUsername}` : 'Instagram',
+                message: m.caption || '',
+                mediaUrl: m.thumbnail_url || m.media_url || null,
+                permalink: m.permalink || null,
+                publishedAt: m.timestamp,
+                likes: m.like_count ?? null,
+                comments: m.comments_count ?? null,
+                shares: null,
+            })),
+        };
+    }
+
     // ==================== FACEBOOK PAGE POST METHODS ====================
 
     /**

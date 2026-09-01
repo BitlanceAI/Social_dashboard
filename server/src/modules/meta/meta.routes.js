@@ -849,6 +849,64 @@ router.get('/posts/scheduled', async (req, res) => {
 });
 
 /**
+ * GET /api/meta/posts/history?limit=25
+ *
+ * LIVE history read from Meta itself: every published post on the
+ * connection's Pages and linked Instagram accounts — including posts made
+ * natively on Facebook/Instagram, not through this app. (LinkedIn has no
+ * equivalent: reading a member's post list needs the restricted
+ * r_member_social scope, so LinkedIn history stays app-tracked only.)
+ */
+router.get('/posts/history', async (req, res) => {
+    try {
+        const loaded = await loadConnection(req, res);
+        if (!loaded) return;
+
+        const perFeedLimit = Math.min(50, parseInt(req.query.limit, 10) || 25);
+
+        // Fresh page list = fresh PAGE tokens; published_posts needs them.
+        const pagesResult = await loaded.metaService.getPages();
+        if (!pagesResult.success) return handleMetaError(res, req.workspaceId, pagesResult);
+
+        // Honour the user's page selection, same as publishing does.
+        const selectedIds = loaded.connection.selected_page_ids;
+        const pages = (pagesResult.pages || []).filter(
+            (p) => !Array.isArray(selectedIds) || selectedIds.map(String).includes(String(p.id)),
+        );
+
+        const feeds = await Promise.all(pages.flatMap((page) => {
+            const jobs = [];
+            if (page.access_token) {
+                jobs.push(loaded.metaService.getPageFeed(page.id, page.name, page.access_token, perFeedLimit));
+            }
+            if (page.instagram_business_account?.id && page.access_token) {
+                jobs.push(loaded.metaService.getInstagramFeed(
+                    page.instagram_business_account.id,
+                    page.instagram_business_account.username,
+                    page.access_token,
+                    perFeedLimit,
+                ));
+            }
+            return jobs;
+        }));
+
+        // One dead feed should not blank the rest; report failures alongside.
+        const posts = [];
+        const feedErrors = [];
+        for (const feed of feeds) {
+            if (feed.success) posts.push(...feed.posts);
+            else feedErrors.push(feed.error);
+        }
+        posts.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+
+        res.json({ success: true, posts, feedErrors });
+    } catch (error) {
+        console.error('Get post history error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
  * Cancel a scheduled post, or delete one that already went live.
  * DELETE /api/meta/posts/:id
  *

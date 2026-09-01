@@ -364,6 +364,35 @@ const MetaDashboardView = () => {
     };
 
 
+    // Live history fetched from Meta itself (all posts on the Pages/IG
+    // accounts, made through this app or not). Loaded lazily when the
+    // History tab first opens; null = not fetched yet.
+    const [platformHistory, setPlatformHistory] = useState(null);
+    const [historyLoading, setHistoryLoading] = useState(false);
+
+    const loadPlatformHistory = async () => {
+        setHistoryLoading(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/meta/posts/history`, {
+                headers: getAuthHeaders()
+            });
+            const data = await response.json();
+            if (handleAuthError(response.status, data)) return;
+            if (data.success) setPlatformHistory(data.posts || []);
+        } catch (error) {
+            console.error('Failed to load platform history:', error);
+        } finally {
+            setHistoryLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (activeTab === 'history' && connection && platformHistory === null && !historyLoading) {
+            loadPlatformHistory();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab, connection]);
+
     const loadScheduledPosts = async () => {
         try {
             const response = await fetch(`${API_BASE_URL}/api/meta/posts/scheduled`, {
@@ -839,6 +868,7 @@ const MetaDashboardView = () => {
                         loading={loading}
                         isConnected={isConnected}
                         targets={targets}
+                        instagramAccounts={connection?.instagramAccounts || []}
                         linkedinConnection={liConnection}
                         postCounts={postCounts}
                         onAddProfile={() => setShowConnectModal(true)}
@@ -889,26 +919,96 @@ const MetaDashboardView = () => {
                     </div>
                 )}
 
-                {/* Post History tab */}
-                {activeTab === 'history' && isConnected && (
+                {/* Post History tab — live feed straight from Meta, so it
+                    includes posts made natively on FB/IG, not just ours. */}
+                {activeTab === 'history' && isConnected && connection && (
                     <div className="bg-[var(--surface)] rounded-3xl border border-[var(--border)] p-5 sm:p-6 mb-6 sm:mb-8">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)]">Published Posts</h3>
-                            <span className="text-xs text-[var(--muted)]">
-                                {publishedPosts.length} published
-                            </span>
+                        <div className="flex items-center justify-between mb-1">
+                            <h3 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)]">All Posts</h3>
+                            <button
+                                onClick={loadPlatformHistory}
+                                disabled={historyLoading}
+                                className="p-2 rounded-xl border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--bg)] transition-colors disabled:opacity-60"
+                                title="Refresh"
+                            >
+                                <RefreshCw className={`h-4 w-4 ${historyLoading ? 'animate-spin' : ''}`} />
+                            </button>
                         </div>
+                        <p className="text-xs text-[var(--muted)] mb-4">
+                            Everything published on your connected Pages and Instagram accounts —
+                            whether it was posted through Botlance or natively.
+                        </p>
 
-                        {publishedPosts.length === 0 ? (
+                        {historyLoading && platformHistory === null ? (
+                            <div className="py-10 text-center text-sm text-[var(--muted)]">Loading your posts…</div>
+                        ) : !platformHistory?.length ? (
                             <div className="py-10 text-center">
                                 <Send className="h-8 w-8 mx-auto mb-3 text-[var(--muted-2)]" />
                                 <p className="text-sm text-[var(--muted)]">
-                                    Nothing published yet. Scheduled posts appear here once they go live.
+                                    No posts found on your connected accounts yet.
                                 </p>
                             </div>
                         ) : (
                             <div className="space-y-3">
-                                {publishedPosts.map(post => {
+                                {platformHistory.map(post => {
+                                    const Icon = platformMeta(post.platform).Icon;
+                                    return (
+                                        <div
+                                            key={post.id}
+                                            className="flex items-start gap-4 p-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)]"
+                                        >
+                                            {post.mediaUrl && (
+                                                <img
+                                                    src={post.mediaUrl}
+                                                    alt=""
+                                                    loading="lazy"
+                                                    className="w-14 h-14 rounded-xl object-cover border border-[var(--border)] shrink-0"
+                                                />
+                                            )}
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm text-[var(--text)] line-clamp-2 mb-2">
+                                                    {post.message || <span className="text-[var(--muted-2)]">No caption</span>}
+                                                </p>
+                                                <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+                                                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-[var(--accent-muted)] text-[var(--accent)] font-medium">
+                                                        <Icon className="h-3 w-3" />
+                                                        {post.pageName}
+                                                    </span>
+                                                    <span>{new Date(post.publishedAt).toLocaleString()}</span>
+                                                    {post.likes !== null && <span>· {post.likes} likes</span>}
+                                                    {post.comments !== null && <span>· {post.comments} comments</span>}
+                                                    {post.permalink && (
+                                                        <a
+                                                            href={post.permalink}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="text-[var(--accent)] hover:text-[var(--accent-hover)]"
+                                                        >
+                                                            View →
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* LinkedIn history stays app-tracked: LinkedIn's API does not
+                    let non-partner apps read a member's post list. */}
+                {activeTab === 'history' && isConnected && publishedPosts.filter(p => p.provider === 'linkedin').length > 0 && (
+                    <div className="bg-[var(--surface)] rounded-3xl border border-[var(--border)] p-5 sm:p-6 mb-6 sm:mb-8">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)]">LinkedIn Posts</h3>
+                            <span className="text-xs text-[var(--muted)]">
+                                published via Botlance — LinkedIn does not expose full history
+                            </span>
+                        </div>
+                        <div className="space-y-3">
+                                {publishedPosts.filter(p => p.provider === 'linkedin').map(post => {
                                     const results = post.publish_results || {};
                                     const targets = (post.platforms && post.platforms.length) ? post.platforms : ['facebook'];
                                     return (
@@ -957,15 +1057,7 @@ const MetaDashboardView = () => {
                                         </div>
                                     );
                                 })}
-                            </div>
-                        )}
-
-                        {/* A post can succeed on one network and fail on the other */}
-                        {publishedPosts.some(p => p.error_message) && (
-                            <p className="mt-4 text-[11px] text-[var(--muted)]">
-                                Some posts published to only one network. Hover a red badge for the reason Meta returned.
-                            </p>
-                        )}
+                        </div>
                     </div>
                 )}
 
