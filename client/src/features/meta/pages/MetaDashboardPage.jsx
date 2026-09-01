@@ -7,9 +7,11 @@ import SocialProfilesPanel from '@/features/meta/components/SocialProfilesPanel'
 import AddProfileModal from '@/features/meta/components/AddProfileModal';
 import PageSelectModal from '@/features/meta/components/PageSelectModal';
 import NotificationToggle from '@/features/notifications/components/NotificationToggle';
+import { NotificationsBell } from '@/features/notifications';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/features/auth/context/AuthContext';
 import { useWorkspace, WorkspaceSwitcher } from '@/features/workspace';
+import { MediaLibrary } from '@/features/storage';
 import Logo from '@/shared/components/layout/Logo';
 import { supabase } from '@/shared/lib/supabase';
 import toast from 'react-hot-toast';
@@ -810,10 +812,19 @@ const MetaDashboardView = () => {
                     so the switcher gets its own strip up here instead. */}
                 <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between gap-3 px-4 py-3 border-b border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur">
                     <Logo className="h-6" />
-                    <WorkspaceSwitcher compact />
+                    <div className="flex items-center gap-2">
+                        <NotificationsBell posts={scheduledPosts} liConnection={liConnection} />
+                        <WorkspaceSwitcher compact />
+                    </div>
                 </div>
 
             <main className="flex-1 min-w-0 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-10 py-6 sm:py-10 pb-32 lg:pb-16">
+
+                {/* Desktop: the sidebar carries nav, so the bell gets a slim
+                    utility row at the top of the content column. */}
+                <div className="hidden lg:flex justify-end mb-4">
+                    <NotificationsBell posts={scheduledPosts} liConnection={liConnection} />
+                </div>
 
 
                 {/* Social Profiles tab */}
@@ -987,6 +998,25 @@ const MetaDashboardView = () => {
                             setShowScheduleModal(true);
                         }}
                     />
+                )}
+
+                {/* Media Library tab — files stored in the user's paid storage */}
+                {activeTab === 'library' && (
+                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                        <div className="flex items-center gap-4 mb-1">
+                            <h2 className="flex-1 text-[15px] font-semibold text-[var(--text)]">Media Library</h2>
+                            <button
+                                onClick={() => navigate('/storage')}
+                                className="text-sm font-medium text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                            >
+                                Manage storage →
+                            </button>
+                        </div>
+                        <p className="text-xs text-[var(--muted)] mb-4">
+                            Upload once, reuse in any post — the composer's Library tab pulls from here.
+                        </p>
+                        <MediaLibrary />
+                    </div>
                 )}
 
                 {/* Analytics tab */}

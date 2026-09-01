@@ -18,6 +18,8 @@ import metaRoutes from './modules/meta/meta.routes.js';
 import linkedinRoutes from './modules/linkedin/linkedin.routes.js';
 import workspaceRoutes from './modules/workspace/workspace.routes.js';
 import pushRoutes from './modules/push/push.routes.js';
+import adminRoutes from './modules/admin/admin.routes.js';
+import storageRoutes from './modules/storage/storage.routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -47,6 +49,8 @@ app.use('/api/meta', metaRoutes); // Facebook Pages + Instagram publishing
 app.use('/api/linkedin', linkedinRoutes); // LinkedIn member + (dormant) Page publishing
 app.use('/api/workspaces', workspaceRoutes); // membership, roles, invites
 app.use('/api/push', pushRoutes); // web push registration (FCM)
+app.use('/api/admin', adminRoutes); // platform administration (role='admin' only)
+app.use('/api/storage', storageRoutes); // paid media storage (Razorpay)
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date() });

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Building2, Loader2 } from 'lucide-react';
 
 /**
@@ -49,7 +50,11 @@ const CreateWorkspaceModal = ({ onClose, onCreate }) => {
         }
     };
 
-    return (
+    // Portalled to <body>: this dialog mounts inside the sidebar, and the
+    // sidebar's position:sticky creates a stacking context that would trap
+    // the overlay's z-index beneath the main content (positioned elements
+    // there — media cards, panels — painted over the dialog).
+    return createPortal(
         <div
             className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
             onClick={() => !saving && onClose()}
@@ -133,7 +138,8 @@ const CreateWorkspaceModal = ({ onClose, onCreate }) => {
                     </div>
                 </form>
             </div>
-        </div>
+        </div>,
+        document.body,
     );
 };
 

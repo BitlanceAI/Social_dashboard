@@ -1,16 +1,30 @@
 import React, { useState } from 'react';
 import { UploadCloud, Trash2, PlusCircle } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { MediaLibrary } from '@/features/storage';
 
 /**
  * Media Selector Component
- * Handles file upload and URL input for post media
+ * Handles file upload, URL input, and the user's stored media library.
+ * Library picks land in mediaUrls as absolute public URLs — the same shape
+ * as URL mode, so the publish path needs no changes.
  */
 const MediaSelector = ({
     mediaUrls,
     mediaFiles,
     onUpdate
 }) => {
-    const [uploadMode, setUploadMode] = useState('file'); // 'file' | 'url'
+    const [uploadMode, setUploadMode] = useState('file'); // 'file' | 'url' | 'library'
+
+    // Import a stored file: its public URL rides along like a pasted URL.
+    const pickFromLibrary = (item) => {
+        if (mediaUrls.includes(item.url)) {
+            toast('Already added');
+            return;
+        }
+        onUpdate({ mediaUrls: [...mediaUrls, item.url] });
+        toast.success(`Added ${item.file_name}`);
+    };
 
     // Handle file selection
     const handleFileSelect = (e) => {
@@ -50,7 +64,7 @@ const MediaSelector = ({
             </label>
 
             {/* Mode Toggle */}
-            <div className="grid grid-cols-2 p-1 bg-[var(--surface)] border border-[var(--border)] mb-6">
+            <div className="grid grid-cols-3 p-1 bg-[var(--surface)] border border-[var(--border)] mb-6">
                 <button
                     onClick={() => setUploadMode('file')}
                     className={`py-3 text-xs transition-all ${uploadMode === 'file'
@@ -73,6 +87,15 @@ const MediaSelector = ({
                         }`}
                 >
                     Media URL
+                </button>
+                <button
+                    onClick={() => setUploadMode('library')}
+                    className={`py-3 text-xs transition-all ${uploadMode === 'library'
+                            ? 'bg-[var(--accent)] text-[var(--bg)] font-bold shadow-[2px_2px_0_0_var(--border)] -translate-y-0.5 rounded-xl'
+                            : 'bg-transparent text-[var(--muted)] hover:text-[var(--text)] border border-transparent hover:border-[var(--border)] rounded-xl'
+                        }`}
+                >
+                    Library
                 </button>
             </div>
 
@@ -127,6 +150,11 @@ const MediaSelector = ({
                         </div>
                     )}
                 </div>
+            )}
+
+            {/* Library Mode — stored media, click to import */}
+            {uploadMode === 'library' && (
+                <MediaLibrary compact onPick={pickFromLibrary} />
             )}
 
             {/* URL Mode */}

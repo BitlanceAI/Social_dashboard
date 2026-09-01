@@ -11,6 +11,8 @@ const LandingPage      = lazy(() => import('@/features/marketing/pages/LandingPa
 const PrivacyPolicy    = lazy(() => import('@/features/legal/pages/PrivacyPolicy'));
 const TermsPage        = lazy(() => import('@/features/legal/pages/TermsPage'));
 const DataDeletionPage = lazy(() => import('@/features/legal/pages/DataDeletionPage'));
+const AdminPanelPage   = lazy(() => import('@/features/admin/pages/AdminPanelPage'));
+const StoragePage      = lazy(() => import('@/features/storage/pages/StoragePage'));
 
 const guarded = (element) => <AuthGuard>{element}</AuthGuard>;
 
@@ -26,6 +28,13 @@ export const routes = [
   // Meta dashboard — also the OAuth return target
   // (see META_RETURN_PATH in server/src/modules/meta/meta.routes.js)
   { path: '/socialdashboad', element: guarded(<MetaDashboardPage />) },
+
+  // Admin panel — the server enforces users.role='admin'; the page renders
+  // an access-denied screen for everyone else
+  { path: '/admin', element: guarded(<AdminPanelPage />) },
+
+  // Paid media storage (Razorpay)
+  { path: '/storage', element: guarded(<StoragePage />) },
 
   // Legal — linked from the Meta app dashboard; both are required for Meta App Review
   { path: '/privacy-policy', element: <PrivacyPolicy /> },

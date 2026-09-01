@@ -108,6 +108,27 @@ export const WorkspaceProvider = ({ children }) => {
         return data.workspace;
     }, [token]);
 
+    const deleteWorkspace = useCallback(async (id) => {
+        const response = await fetch(`${API_BASE_URL}/api/workspaces/${id}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+                'ngrok-skip-browser-warning': 'true',
+            },
+        });
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Could not delete the workspace');
+        }
+
+        // Re-fetch rather than splice: the server re-mints a default when the
+        // last workspace goes, and load() also re-resolves the active choice.
+        if (activeWorkspaceId === id) setActiveWorkspaceId(null);
+        await load();
+    }, [token, activeWorkspaceId, load]);
+
     const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId) || null;
 
     return (
@@ -118,6 +139,7 @@ export const WorkspaceProvider = ({ children }) => {
             loading,
             switchWorkspace,
             createWorkspace,
+            deleteWorkspace,
             refreshWorkspaces: load,
         }}>
             {children}

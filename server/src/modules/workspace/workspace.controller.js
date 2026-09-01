@@ -12,6 +12,7 @@ import '../../config/env.js';
 
 import crypto from 'crypto';
 import { supabaseAdmin as supabase } from '../../config/supabase.js';
+import { purgeWorkspaceMedia } from '../storage/storage.service.js';
 
 const ROLES = ['owner', 'admin', 'member'];
 
@@ -107,8 +108,12 @@ export const createWorkspace = async (req, res) => {
 
         // An RPC because supabase-js has no transactions, and a workspaces row
         // without its owner membership row is permanently unreachable — no RLS
-        // predicate could ever be satisfied for it.
-        const { data: id, error } = await supabase.rpc('create_workspace', { p_name: name });
+        // predicate could ever be satisfied for it. p_user is required here:
+        // this is the service-role client, so auth.uid() is NULL in the RPC.
+        const { data: id, error } = await supabase.rpc('create_workspace', {
+            p_name: name,
+            p_user: req.user.id,
+        });
         if (error) throw error;
 
         const { data: workspace } = await supabase
@@ -157,6 +162,13 @@ export const deleteWorkspace = async (req, res) => {
             .select('id')
             .eq('default_workspace_id', id);
 
+        // Physical media objects first: the workspaces delete cascades the
+        // media_library ROWS, but a cascade cannot reach the files in
+        // Bunny/Supabase — skipping this leaks paid storage silently.
+        await purgeWorkspaceMedia(id);
+
+        // The row delete cascades the rest: meta/linkedin connections
+        // (disconnecting them), scheduled posts, members, and invites.
         const { error } = await supabase.from('workspaces').delete().eq('id', id);
         if (error) throw error;
 

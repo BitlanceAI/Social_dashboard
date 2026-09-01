@@ -119,6 +119,13 @@ LINKEDIN_RETURN_PATH=
 LINKEDIN_ORG_SCOPES_ENABLED=false  # flipping this invalidates ALL LinkedIn tokens
 FRONTEND_URL=
 ENCRYPTION_KEY=
+RAZORPAY_KEY_ID=              # storage billing; buy button disabled without both
+RAZORPAY_KEY_SECRET=
+BUNNY_STORAGE_ZONE=           # media library backend; zone+key+pull-zone set = Bunny,
+BUNNY_API_KEY=                #   any missing = falls back to Supabase Storage.
+BUNNY_PULL_ZONE_URL=          # e.g. https://bitlance.b-cdn.net (protocol optional)
+BUNNY_REGION=                 # storage region prefix (sg, ny, …); empty/de = default
+BUNNY_ACCOUNT_API_KEY=        # optional; enables CDN cache purge on delete (Account → API key, ≠ zone password)
 PORT=3001
 ALLOWED_ORIGINS=              # Comma-separated, overrides hardcoded list
 INSECURE_TLS=true             # Dev only — disable in production
@@ -136,7 +143,10 @@ VITE_FIREBASE_*=              # optional; web push opt-in hides itself without t
 
 ## Database — Supabase Tables
 
-`users`, `meta_connections`, `linkedin_connections`, `scheduled_posts`, `push_tokens`
+`users`, `meta_connections`, `linkedin_connections`, `scheduled_posts`, `push_tokens`,
+`storage_settings` (single row: price/GB/month in paise + delete-after-expiry days, admin-set),
+`storage_purchases` (Razorpay order lifecycle; amounts in minor units; entitlement = paid rows with future `expires_at`),
+`media_library` (reusable files, isolated per workspace via `workspace_id` + the `x-workspace-id` header; keys `library/{workspace}/{user}/…` — Bunny Storage when the BUNNY_* env vars are set, else the `post-media` bucket; each row's `url` records where its object lives, so deletes route correctly across a backend switch; `size_bytes` sum vs purchased GB is the per-user quota check across all workspaces)
 
 `scheduled_posts.provider` (`'meta' | 'linkedin'`) picks the publisher, and a
 CHECK constraint enforces that exactly the matching connection FK is set. The
@@ -155,6 +165,8 @@ Migrations live in the repo-root `supabase/migrations/` (single CLI project).
 | `/api/meta` | `modules/meta` | OAuth, Pages, FB + Instagram publishing, scheduling |
 | `/api/linkedin` | `modules/linkedin` | OAuth, member publishing, scheduling, delete, metrics |
 | `/api/push` | `modules/push` | FCM web-push token registration |
+| `/api/admin` | `modules/admin` | Platform admin (users.role='admin' only): stats, users, connections, storage settings |
+| `/api/storage` | `modules/storage` | Paid media storage: Razorpay orders + verification, entitlement |
 | `/health` | `app.js` | Liveness probe |
 
 All mounted in `server/src/app.js`.

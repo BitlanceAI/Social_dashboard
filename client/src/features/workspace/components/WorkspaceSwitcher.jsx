@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronsUpDown, Check, Plus, Building2 } from 'lucide-react';
+import { ChevronsUpDown, Check, Plus, Building2, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useWorkspace } from '@/features/workspace/context/WorkspaceContext';
 import CreateWorkspaceModal from '@/features/workspace/components/CreateWorkspaceModal';
+import DeleteWorkspaceModal from '@/features/workspace/components/DeleteWorkspaceModal';
 
 /**
  * Active-workspace picker.
@@ -11,10 +12,14 @@ import CreateWorkspaceModal from '@/features/workspace/components/CreateWorkspac
  * the full-width sidebar button.
  */
 const WorkspaceSwitcher = ({ compact = false }) => {
-    const { workspaces, activeWorkspace, activeWorkspaceId, switchWorkspace, createWorkspace } = useWorkspace();
+    const {
+        workspaces, activeWorkspace, activeWorkspaceId,
+        switchWorkspace, createWorkspace, deleteWorkspace,
+    } = useWorkspace();
 
     const [open, setOpen] = useState(false);
     const [showCreate, setShowCreate] = useState(false);
+    const [confirmDelete, setConfirmDelete] = useState(null); // workspace to delete
     const containerRef = useRef(null);
 
     // Close on an outside click or Escape, the way a menu is expected to behave.
@@ -76,13 +81,12 @@ const WorkspaceSwitcher = ({ compact = false }) => {
                 >
                     <div className="max-h-64 overflow-y-auto py-1">
                         {workspaces.map((workspace) => (
-                            <button
+                            <div
                                 key={workspace.id}
-                                type="button"
                                 role="option"
                                 aria-selected={workspace.id === activeWorkspaceId}
                                 onClick={() => { switchWorkspace(workspace.id); setOpen(false); }}
-                                className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-[var(--bg)] transition-colors"
+                                className="group w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-[var(--bg)] transition-colors cursor-pointer"
                             >
                                 <span className="w-4 shrink-0">
                                     {workspace.id === activeWorkspaceId && (
@@ -97,7 +101,22 @@ const WorkspaceSwitcher = ({ compact = false }) => {
                                         {workspace.role}
                                     </span>
                                 </span>
-                            </button>
+                                {workspace.role === 'owner' && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setOpen(false);
+                                            setConfirmDelete(workspace);
+                                        }}
+                                        className="p-1.5 rounded-lg text-[var(--muted-2)] opacity-0 group-hover:opacity-100 hover:text-[#F87171] hover:bg-[var(--surface-2)] transition-all shrink-0"
+                                        title={`Delete ${workspace.name}`}
+                                        aria-label={`Delete ${workspace.name}`}
+                                    >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                )}
+                            </div>
                         ))}
                     </div>
 
@@ -116,6 +135,17 @@ const WorkspaceSwitcher = ({ compact = false }) => {
                 <CreateWorkspaceModal
                     onClose={() => setShowCreate(false)}
                     onCreate={handleCreate}
+                />
+            )}
+
+            {confirmDelete && (
+                <DeleteWorkspaceModal
+                    workspace={confirmDelete}
+                    onClose={() => setConfirmDelete(null)}
+                    onDelete={async () => {
+                        await deleteWorkspace(confirmDelete.id);
+                        toast.success(`${confirmDelete.name} deleted`);
+                    }}
                 />
             )}
         </div>

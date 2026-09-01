@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { useTheme } from '@/shared/context/ThemeContext';
 import {
     UserCircle,
+    HardDrive,
     CalendarClock,
     Send,
     BarChart3,
@@ -31,6 +32,7 @@ import {
 const NAV = [
     { id: 'create', label: 'Create a Post', short: 'Create', icon: PenSquare, needsConnection: false },
     { id: 'profiles', label: 'Social Profiles', short: 'Profiles', icon: UserCircle, needsConnection: false },
+    { id: 'library', label: 'Media Library', short: 'Library', icon: HardDrive, needsConnection: false },
     { id: 'scheduled', label: 'Scheduled Posts', short: 'Queue', icon: CalendarClock, needsConnection: true },
     { id: 'history', label: 'Post History', short: 'History', icon: Send, needsConnection: true },
     { id: 'analytics', label: 'Analytics', short: 'Stats', icon: BarChart3, needsConnection: true },
@@ -73,7 +75,7 @@ const DashboardSidebar = ({
     return (
         <aside className="hidden lg:flex lg:flex-col w-64 shrink-0 sticky top-0 h-screen border-r border-[var(--border)] bg-[var(--bg)] px-4 py-6">
             {/* Brand */}
-            <Link to="/" className="flex items-center px-1 mb-5">
+            <Link to="/" className="flex items-center justify-center px-1 mb-5">
                 <Logo className="h-7" />
             </Link>
 

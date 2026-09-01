@@ -18,6 +18,7 @@ import MetaService from '../meta/meta.service.js';
 import LinkedInService from '../linkedin/linkedin.service.js';
 import { decryptData } from '../../shared/utils/encryption.js';
 import { sendToWorkspace } from '../push/push.service.js';
+import { sweepExpiredStorage } from '../storage/storage.service.js';
 
 let supabase;
 
@@ -138,6 +139,8 @@ export const startPostScheduler = () => {
         // Piggybacks on the same reachability guard as the publish pass.
         if (tickCount++ % EXPIRY_SWEEP_EVERY_TICKS === 0) {
             sweepExpiringLinkedInTokens();
+            // Purges libraries whose paid storage lapsed past the grace window.
+            sweepExpiredStorage();
         }
     };
 
