@@ -394,6 +394,9 @@ router.get('/connection', async (req, res) => {
             connected: true,
             isValid: validation.isValid,
             grantedScopes: validation.scopes || [],
+            // What the app asks for — lets the client show which grants the
+            // stored token is missing, instead of features failing silently.
+            requiredScopes: MetaService.DEFAULT_SCOPES,
             expiresAt: connection.token_expires_at,
             needsPageSelection,
             // Every Page Meta returned, for the picker

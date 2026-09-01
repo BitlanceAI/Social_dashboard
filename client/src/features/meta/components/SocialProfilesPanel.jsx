@@ -16,6 +16,7 @@ const SocialProfilesPanel = ({
     loading,
     isConnected,
     targets = [],
+    metaScopes = null,
     instagramAccounts = [],
     linkedinConnection,
     postCounts = {},
@@ -30,6 +31,13 @@ const SocialProfilesPanel = ({
     if (loading) return null;
 
     const expiry = linkedinConnection?.needsReconnect ? linkedinConnection : null;
+
+    // Permissions the app asks for that Meta says this token does NOT carry.
+    // This is why "History shows nothing" and similar failures happen, so it
+    // must be visible here, not just in server logs.
+    const missingScopes = metaScopes
+        ? metaScopes.required.filter((s) => !metaScopes.granted.includes(s))
+        : [];
 
     return (
         <div className="space-y-6">
@@ -81,6 +89,30 @@ const SocialProfilesPanel = ({
                         <p className="text-[12px] text-[var(--muted)] leading-relaxed mt-0.5">
                             LinkedIn access lasts 60 days and cannot be renewed automatically.
                             Reconnect to keep scheduled posts publishing.
+                        </p>
+                    </div>
+                    <button
+                        onClick={onAddProfile}
+                        className="shrink-0 px-4 py-2 rounded-full border border-[var(--border)] text-xs text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                    >
+                        Reconnect
+                    </button>
+                </div>
+            )}
+
+            {/* The token's grants decide what works; missing ones must be
+                visible with the remedy attached. */}
+            {missingScopes.length > 0 && (
+                <div className="flex items-start gap-3 rounded-2xl border border-amber-400/60 bg-amber-500/10 p-4">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-amber-500" />
+                    <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-[var(--text)]">
+                            Your Facebook connection is missing {missingScopes.length} permission{missingScopes.length === 1 ? '' : 's'}
+                        </p>
+                        <p className="text-[12px] text-[var(--muted)] leading-relaxed mt-0.5">
+                            Features that depend on them (post history, analytics, comments) will fail
+                            until you reconnect and approve everything in Facebook's dialog:
+                            {' '}<span className="font-mono">{missingScopes.join(', ')}</span>
                         </p>
                     </div>
                     <button

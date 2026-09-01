@@ -875,6 +875,10 @@ const MetaDashboardView = () => {
                         loading={loading}
                         isConnected={isConnected}
                         targets={targets}
+                        metaScopes={connection ? {
+                            granted: connection.grantedScopes || [],
+                            required: connection.requiredScopes || [],
+                        } : null}
                         instagramAccounts={connection?.instagramAccounts || []}
                         linkedinConnection={liConnection}
                         postCounts={postCounts}
