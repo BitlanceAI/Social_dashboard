@@ -84,16 +84,36 @@ class MetaService {
 
     /**
      * Get user's Facebook Pages, including any linked Instagram Business account.
+     *
+     * /me/accounts is PAGINATED — Meta returns a page at a time and a user who
+     * manages more than one page-worth would otherwise see only the first
+     * slice (the "granted 6, only 3 show" bug). We request a high limit and
+     * follow paging.next until it runs out, so every managed Page is returned.
      */
     async getPages() {
-        const result = await this.request('GET', '/me/accounts', {}, {
-            fields: 'id,name,access_token,category,picture,fan_count,instagram_business_account{id,username,profile_picture_url,followers_count}'
-        });
+        const fields = 'id,name,access_token,category,picture,fan_count,instagram_business_account{id,username,profile_picture_url,followers_count}';
+        const pages = [];
 
-        if (result.success && result.data.data) {
-            return { success: true, pages: result.data.data };
+        let result = await this.request('GET', '/me/accounts', {}, { fields, limit: 100 });
+        if (!result.success) return result;
+
+        for (let guard = 0; guard < 20; guard += 1) {
+            pages.push(...(result.data.data || []));
+
+            const next = result.data.paging?.next;
+            if (!next) break;
+            // paging.next is an absolute URL with the cursor + token baked in;
+            // hit it directly rather than reconstructing params.
+            try {
+                const res = await this.client.request({ method: 'GET', url: next });
+                result = { success: true, data: res.data };
+            } catch (error) {
+                console.error('Meta API Error [/me/accounts paging]:', error.response?.data || error.message);
+                break; // return what we have rather than losing the first pages
+            }
         }
-        return result;
+
+        return { success: true, pages };
     }
 
     /**
