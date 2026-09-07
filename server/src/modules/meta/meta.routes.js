@@ -267,6 +267,11 @@ router.post('/connect-api-key', async (req, res) => {
         const userId = req.user.id;
 
         console.log(`🔌 [Meta Connect] Request received for user ${userId}`);
+        // Which path produced this token? A token that arrives WITHOUT the
+        // /oauth/url log above it came from somewhere other than the Meta
+        // OAuth flow (e.g. a Supabase sign-in provider_token or a hand-pasted
+        // token) and will not carry an asset grant.
+        console.log('🔌 [Meta Connect] source:', req.body.source || '(unspecified)');
 
         if (!accessToken) {
             return res.status(400).json({ error: 'Access token is required' });
@@ -296,6 +301,33 @@ router.post('/connect-api-key', async (req, res) => {
 
         const pagesResult = await metaService.getPages();
         console.log(`✅ [Meta Connect] Pages: ${pagesResult.success ? pagesResult.pages?.length : 'failed'}`);
+
+        // An empty page list with a valid token is almost always the token
+        // itself, not the permissions: `scopes` lists the permission names
+        // while the ASSET grant lives in granular_scopes.target_ids. A token
+        // minted before the Page opt-in screen (Graph Explorer, app dashboard)
+        // looks fully scoped here and still returns zero pages.
+        if (pagesResult.success && (pagesResult.pages?.length ?? 0) === 0) {
+            const granular = validation.granularScopes || [];
+            const pagesGrant = granular.find((g) => g.scope === 'pages_show_list');
+            console.warn('⚠️  [Meta Connect] Token is valid but /me/accounts returned NO pages.');
+            // WHO authorized? Every permission here is app-level and is granted
+            // regardless of what the person can administer, so a login by an
+            // account with no Page role looks identical to a cached empty
+            // grant. This line is what tells the two apart.
+            console.warn('   authorized as:', profile.data?.name, `(fb id ${profile.data?.id})`,
+                '- this account must be the one with a Page role in Business settings');
+            console.warn('   token app_id :', validation.appId, '(must match META_APP_ID', `${META_APP_ID})`);
+            console.warn('   token type   :', validation.tokenType, '(USER is expected; SYSTEM_USER needs /{business}/owned_pages)');
+            console.warn('   granular_scopes:', JSON.stringify(granular));
+            if (!pagesGrant) {
+                console.warn('   → pages_show_list has NO granular grant: this token predates the Page opt-in screen. Re-run OAuth to mint a fresh one.');
+            } else if (!(pagesGrant.target_ids || []).length) {
+                console.warn('   → pages_show_list granted with no target_ids: no Page was actually opted in.');
+            } else {
+                console.warn('   → Pages ARE granted to this token:', pagesGrant.target_ids.join(', '), '- the grant is fine, the enumeration is not.');
+            }
+        }
 
         let encryptedToken, encryptedAppSecret;
         try {
@@ -399,6 +431,11 @@ router.get('/oauth/url', (req, res) => {
 
     // The user id doubles as CSRF state so the callback can attribute the token.
     const authUrl = MetaService.getOAuthUrl(META_APP_ID, META_REDIRECT_URI, null, req.user.id);
+    // Without config_id the dialog replays any cached grant and never re-shows
+    // the asset picker, which is the whole reason target_ids come back empty.
+    console.log('🔗 [Meta OAuth] Auth URL built. config_id:',
+        process.env.META_LOGIN_CONFIG_ID || '(NOT SET — classic login, asset picker will NOT re-appear)');
+    console.log('🔗 [Meta OAuth] URL:', authUrl);
     res.json({ success: true, url: authUrl, scopes: MetaService.DEFAULT_SCOPES });
 });
 

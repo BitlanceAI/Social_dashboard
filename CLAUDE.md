@@ -111,6 +111,9 @@ META_APP_ID=
 META_APP_SECRET=
 META_REDIRECT_URI=
 META_RETURN_PATH=             # client route the OAuth callback bounces back to
+META_LOGIN_CONFIG_ID=         # optional; Facebook Login for Business config id. Set = asset picker
+                              #   shows on EVERY authorization (scopes come from the config, not DEFAULT_SCOPES).
+                              #   Unset = classic login, which replays a cached grant and can never re-pick assets.
 LINKEDIN_CLIENT_ID=
 LINKEDIN_CLIENT_SECRET=
 LINKEDIN_REDIRECT_URI=

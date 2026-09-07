@@ -229,25 +229,24 @@ const MetaDashboardView = () => {
         return () => subscription?.unsubscribe();
     }, []);
 
-    // Helper to detect and handle Facebook provider token (with dedup guard)
+    /**
+     * A Supabase session's `provider_token` is the token from SIGNING IN with
+     * Facebook. It is NOT a Meta connection token, and must never be used as
+     * one: the sign-in consent never shows the Page/Instagram asset picker, so
+     * the token comes back with the permission names present but no asset
+     * grant (`granular_scopes` with no `target_ids`). Meta then returns an
+     * empty /me/accounts, and the dashboard shows zero Pages while every
+     * permission looks correctly granted.
+     *
+     * Connecting Meta goes through handleOAuthConnect -> /api/meta/oauth/url,
+     * which is the only flow that presents the asset picker and comes back
+     * with target_ids attached.
+     */
     const checkForFacebookToken = async (currentSession) => {
         if (!currentSession?.provider_token) return;
-        // Prevent duplicate processing
-        if (oauthProcessedRef.current) {
-            console.log('[Meta OAuth] Already processed, skipping...');
-            return;
-        }
-
-        const hasFacebookIdentity =
-            currentSession?.user?.app_metadata?.provider === 'facebook' ||
-            currentSession?.user?.app_metadata?.providers?.includes('facebook') ||
-            currentSession?.user?.identities?.some(id => id.provider === 'facebook');
-
-        if (hasFacebookIdentity) {
-            oauthProcessedRef.current = true;
-            console.log('[Meta OAuth] Found Facebook provider token, connecting...');
-            await handleOAuthComplete(currentSession.provider_token, currentSession.access_token);
-        }
+        console.log(
+            '[Meta OAuth] Ignoring Supabase sign-in provider_token — it carries no Page/IG asset grant. Use Connect to run the Meta OAuth flow.'
+        );
     };
 
     // Check for URL params (legacy/manual OAuth flow fallback)
@@ -501,7 +500,7 @@ const MetaDashboardView = () => {
             const response = await fetch(`${API_BASE_URL}/api/meta/connect-api-key`, {
                 method: 'POST',
                 headers: getAuthHeaders(authToken),
-                body: JSON.stringify({ accessToken: providerToken })
+                body: JSON.stringify({ accessToken: providerToken, source: 'meta-oauth-flow' })
             });
 
             const data = await response.json();

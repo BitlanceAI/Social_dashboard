@@ -16,6 +16,16 @@ import axios from 'axios';
 const META_API_VERSION = process.env.META_API_VERSION || 'v21.0';
 const META_GRAPH_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 
+// /debug_token will not accept an arbitrary user token as its CALLER — Meta
+// requires an app access token (or a token belonging to an owner/developer of
+// the app). This only surfaced once the app went Live: in Development every
+// connecting account was a developer, so the user's own token was accepted.
+const META_APP_ID = process.env.META_APP_ID;
+const META_APP_SECRET = process.env.META_APP_SECRET;
+const APP_ACCESS_TOKEN = META_APP_ID && META_APP_SECRET
+    ? `${META_APP_ID}|${META_APP_SECRET}`
+    : null;
+
 // Instagram video containers are processed asynchronously — poll until FINISHED.
 const IG_STATUS_POLL_INTERVAL_MS = 3000;
 const IG_STATUS_MAX_ATTEMPTS = 40; // ~2 minutes
@@ -120,16 +130,29 @@ class MetaService {
      * Validate access token
      */
     async validateToken() {
+        // access_token here is the CALLER, not the token under inspection:
+        // it must be the app token. Falling back to the user token preserves
+        // the old behaviour when the app credentials are not configured.
         const result = await this.request('GET', '/debug_token', {}, {
-            input_token: this.accessToken
+            input_token: this.accessToken,
+            ...(APP_ACCESS_TOKEN ? { access_token: APP_ACCESS_TOKEN } : {})
         });
 
         if (result.success && result.data.data) {
+            const info = result.data.data;
             return {
                 success: true,
-                isValid: result.data.data.is_valid,
-                expiresAt: result.data.data.expires_at ? new Date(result.data.data.expires_at * 1000) : null,
-                scopes: result.data.data.scopes || []
+                isValid: info.is_valid,
+                expiresAt: info.expires_at ? new Date(info.expires_at * 1000) : null,
+                scopes: info.scopes || [],
+                // Which app minted this token, and whether the permissions are
+                // asset-scoped. When a user opts in to specific Pages, Meta
+                // records the permission with a target_ids list; a token that
+                // predates that screen carries the scope NAME but no targets,
+                // which is indistinguishable from a full grant in `scopes`.
+                appId: info.app_id || null,
+                tokenType: info.type || null,
+                granularScopes: info.granular_scopes || []
             };
         }
         return { success: false, isValid: false };
@@ -714,10 +737,28 @@ class MetaService {
     static getOAuthUrl(appId, redirectUri, scope, state) {
         const scopes = scope || MetaService.DEFAULT_SCOPES;
 
+        // Facebook Login for Business. Classic login shows the Page/Instagram
+        // asset picker only on the FIRST authorization; afterwards "Continue
+        // as ..." silently replays the stored grant, so an account whose first
+        // authorization selected no assets can never attach one — the token
+        // keeps coming back with the scope names and no granular target_ids.
+        // A login configuration re-presents the picker every time. The scope
+        // list lives in the configuration, so it is not sent alongside.
+        const configId = process.env.META_LOGIN_CONFIG_ID;
+
         const params = new URLSearchParams({
             client_id: appId,
             redirect_uri: redirectUri,
-            scope: scopes.join(','),
+            ...(configId
+                ? {
+                    config_id: configId,
+                    // A configuration carries its OWN default response type.
+                    // Without this flag Meta ignores response_type=code and
+                    // returns a token in the URL fragment instead, so our
+                    // /oauth/callback never receives a `code` to exchange.
+                    override_default_response_type: 'true'
+                }
+                : { scope: scopes.join(',') }),
             response_type: 'code',
             state: state || generateState(),
             // Force Facebook to re-prompt for any permission not already
@@ -725,7 +766,11 @@ class MetaService {
             // this, a user whose first connection lacked (or declined)
             // pages_read_engagement keeps getting a scope-less token on every
             // reconnect — the "Continue as…" shortcut skips new permissions.
-            auth_type: 'rerequest'
+            // rerequest re-asks only for DECLINED permissions and is a classic
+            // login concept; a configuration re-presents the asset picker by
+            // itself, and sending both can make the dialog fall back to the
+            // cached grant. Only set it when there is no configuration.
+            ...(configId ? {} : { auth_type: 'rerequest' })
         });
 
         return `https://www.facebook.com/${META_API_VERSION}/dialog/oauth?${params.toString()}`;
