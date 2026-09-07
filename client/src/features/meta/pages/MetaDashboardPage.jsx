@@ -506,6 +506,15 @@ const MetaDashboardView = () => {
             const data = await response.json();
             console.log('[Meta OAuth] Connect response:', data);
             if (data.success) {
+                // The token authenticated but carries no Pages -- opening the
+                // picker would show an empty list with no explanation, so say
+                // what actually went wrong and who was signed in.
+                if (data.warning) {
+                    toast.error(data.warning, { duration: 12000 });
+                    window.history.replaceState({}, '', '/socialdashboad');
+                    await checkConnection();
+                    return;
+                }
                 // Do NOT announce success yet. After connecting, ALWAYS open the
                 // Page picker so the user chooses (or re-confirms) their Pages —
                 // on a reconnect the server keeps the old selection, so the

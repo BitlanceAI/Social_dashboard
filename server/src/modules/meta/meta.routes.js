@@ -406,12 +406,23 @@ router.post('/connect-api-key', async (req, res) => {
 
         console.log(`✅ [Meta Connect] Meta account connected successfully for user ${userId}`);
 
+        // A connection with no Pages is stored (the token is still needed to
+        // re-run the flow) but it cannot publish anything, so say so plainly
+        // instead of reporting success. The usual cause is signing in with a
+        // Facebook account that has no role on the Page -- the browser reuses
+        // whichever Facebook session is already open, which is easy to miss.
+        const noPages = pagesResult.success && (pagesResult.pages?.length ?? 0) === 0;
+
         res.json({
             success: true,
             message: 'Meta account connected successfully',
             profile: profile.data,
             pages: pagesResult.success ? pagesResult.pages : [],
-            expiresAt: validation.expiresAt
+            expiresAt: validation.expiresAt,
+            ...(noPages ? {
+                warning: `Signed in as ${profile.data?.name || 'this account'}, which does not manage any Facebook Page that was shared with the app. `
+                    + 'Either sign in with the account that has a Page role, or assign this account to the Page in Meta Business settings, then connect again.'
+            } : {})
         });
 
     } catch (error) {
