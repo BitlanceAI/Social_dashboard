@@ -13,6 +13,7 @@ import '../../config/env.js';
 import crypto from 'crypto';
 import { supabaseAdmin as supabase } from '../../config/supabase.js';
 import { purgeWorkspaceMedia } from '../storage/storage.service.js';
+import { wouldExceed } from '../billing/billing.service.js';
 
 const ROLES = ['owner', 'admin', 'member'];
 
@@ -105,6 +106,15 @@ export const createWorkspace = async (req, res) => {
     try {
         const name = (req.body?.name || '').trim();
         if (!name) return res.status(400).json({ error: 'A workspace name is required' });
+
+        // Plan cap: the owner's plan limits how many workspaces they can run.
+        // Fail-open inside wouldExceed, so a billing outage never blocks this.
+        if (await wouldExceed(req.user.id, 'workspaces', 1)) {
+            return res.status(402).json({
+                error: 'Your plan\'s workspace limit is reached. Upgrade to add more.',
+                code: 'PLAN_LIMIT',
+            });
+        }
 
         // An RPC because supabase-js has no transactions, and a workspaces row
         // without its owner membership row is permanently unreachable — no RLS
@@ -318,6 +328,17 @@ export const createInvite = async (req, res) => {
 
         if (!email || !email.includes('@')) {
             return res.status(400).json({ error: 'A valid email is required' });
+        }
+
+        // Team-member cap counts against the workspace OWNER's plan (the
+        // subscription is per owner, covering all their workspaces). Fail-open.
+        const { data: ws } = await supabase
+            .from('workspaces').select('owner_id').eq('id', id).single();
+        if (ws?.owner_id && await wouldExceed(ws.owner_id, 'users', 1)) {
+            return res.status(402).json({
+                error: 'This workspace\'s plan has reached its team-member limit. The owner can upgrade to invite more.',
+                code: 'PLAN_LIMIT',
+            });
         }
 
         const token = crypto.randomBytes(32).toString('base64url');

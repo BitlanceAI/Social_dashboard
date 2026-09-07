@@ -367,19 +367,69 @@ class MetaService {
     }
 
     /**
-     * Schedule a post natively on a Facebook Page.
-     * Meta requires the time to be 10 minutes – 75 days in the future.
+     * Schedule a post natively on a Facebook Page — Meta holds it and publishes
+     * at the given time, independent of our server. Mirrors publishPost's media
+     * handling, but every node is created unpublished with scheduled_publish_time.
+     *
+     * Meta requires the time to be 10 minutes – 75 days in the future (validated
+     * by the caller). Returns the created post/photo/video id.
      */
-    async schedulePost(pageId, pageAccessToken, { message, link, scheduledTime }) {
+    async schedulePost(pageId, pageAccessToken, { message, link, mediaUrls, scheduledTime }) {
         const service = new MetaService(pageAccessToken);
+        const media = (mediaUrls || []).filter(Boolean);
+        const publishAt = Math.floor(new Date(scheduledTime).getTime() / 1000);
 
+        // Single video → /videos, scheduled.
+        if (media.length === 1 && isVideoUrl(media[0])) {
+            return service.request('POST', `/${pageId}/videos`, {
+                description: message,
+                file_url: media[0],
+                published: false,
+                scheduled_publish_time: publishAt,
+            });
+        }
+
+        // Single image → /photos, scheduled.
+        if (media.length === 1) {
+            return service.request('POST', `/${pageId}/photos`, {
+                caption: message,
+                url: media[0],
+                published: false,
+                scheduled_publish_time: publishAt,
+            });
+        }
+
+        // Multiple images → upload each as a temporary unpublished photo, then a
+        // single scheduled feed post that attaches them.
+        if (media.length > 1) {
+            const attached = [];
+            for (const url of media) {
+                const uploaded = await service.request('POST', `/${pageId}/photos`, {
+                    url,
+                    published: false,
+                    temporary: true,
+                });
+                if (!uploaded.success) return uploaded;
+                attached.push({ media_fbid: uploaded.data.id });
+            }
+
+            const postData = {
+                message,
+                attached_media: attached,
+                published: false,
+                scheduled_publish_time: publishAt,
+            };
+            if (link) postData.link = link;
+            return service.request('POST', `/${pageId}/feed`, postData);
+        }
+
+        // Text / link only.
         const postData = {
             message,
             published: false,
-            scheduled_publish_time: Math.floor(new Date(scheduledTime).getTime() / 1000)
+            scheduled_publish_time: publishAt,
         };
         if (link) postData.link = link;
-
         return service.request('POST', `/${pageId}/feed`, postData);
     }
 

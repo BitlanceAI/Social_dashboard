@@ -19,6 +19,7 @@ import { authenticateUser } from '../../middleware/auth.js';
 import { resolveWorkspace } from '../../middleware/workspace.js';
 import { encryptData, decryptData } from '../../shared/utils/encryption.js';
 import { uploadPostMedia, postMediaUpload } from '../../shared/storage/postMedia.js';
+import { getEntitlement, dailyPostCapExceeded } from '../billing/billing.service.js';
 
 const router = express.Router();
 
@@ -144,6 +145,42 @@ const validateTokenCached = async (connectionId, updatedAt, metaService) => {
         tokenValidationCache.set(connectionId, { key, result, at: Date.now() });
     }
     return result;
+};
+
+/**
+ * Block publishing when the subscription has lapsed (trial ended, no active
+ * plan). Returns true (and responds 402) when blocked. Fails OPEN — a billing
+ * lookup error must never stop a paying/trialing user from publishing.
+ */
+const billingBlocksPublishing = async (req, res) => {
+    try {
+        const ent = await getEntitlement(req.user.id);
+        if (!ent.active) {
+            res.status(402).json({
+                error: 'Your free trial has ended. Subscribe to resume publishing.',
+                code: 'BILLING_INACTIVE',
+            });
+            return true;
+        }
+    } catch (e) {
+        console.error('[Meta] billing gate skipped:', e.message);
+    }
+    return false;
+};
+
+/**
+ * Enforce the plan's per-account daily post cap. Returns true (and responds
+ * 402) when today's cap for this page is reached. Fails OPEN.
+ */
+const dailyCapBlocks = async (req, res, pageId) => {
+    if (await dailyPostCapExceeded(req.user.id, req.workspaceId, pageId)) {
+        res.status(402).json({
+            error: 'You have reached your plan\'s daily post limit for this account. Upgrade for more.',
+            code: 'PLAN_LIMIT',
+        });
+        return true;
+    }
+    return false;
 };
 
 /**
@@ -311,6 +348,28 @@ router.post('/connect-api-key', async (req, res) => {
         if (error) {
             console.error(`❌ [Meta Connect] Database error:`, error);
             throw error;
+        }
+
+        // Agency model: the SAME Facebook account can be assigned to several
+        // workspaces (one per client). Propagate the fresh token + page list to
+        // every OTHER workspace connection for this account, so reconnecting in
+        // one workspace keeps the others working. Each keeps its own
+        // selected_page_ids — only the credentials are refreshed.
+        try {
+            const { error: propError } = await supabase
+                .from('meta_connections')
+                .update({
+                    access_token: encryptedToken,
+                    token_expires_at: validation.expiresAt,
+                    pages: pagesResult.success ? pagesResult.pages : [],
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('user_id', userId)
+                .eq('meta_user_id', profile.data.id)
+                .neq('workspace_id', req.workspaceId);
+            if (propError) console.error('[Meta Connect] token propagation failed:', propError.message);
+        } catch (e) {
+            console.error('[Meta Connect] token propagation skipped:', e.message);
         }
 
         console.log(`✅ [Meta Connect] Meta account connected successfully for user ${userId}`);
@@ -531,6 +590,72 @@ router.post('/refresh-accounts', async (req, res) => {
 });
 
 /**
+ * Assign Pages from THIS connection to another workspace — the agency model:
+ * connect the account once, then distribute its Pages across client
+ * workspaces without reconnecting each time.
+ *
+ * POST /api/meta/pages/assign   body: { targetWorkspaceId, pageIds: [] }
+ *
+ * Copies this connection's token + full Page list into the target workspace's
+ * connection, with selected_page_ids = the chosen subset. The caller must be a
+ * member of the target workspace (checked via workspace_members).
+ */
+router.post('/pages/assign', async (req, res) => {
+    try {
+        const { targetWorkspaceId, pageIds } = req.body || {};
+        if (!targetWorkspaceId) return res.status(400).json({ error: 'targetWorkspaceId is required' });
+        if (!Array.isArray(pageIds) || pageIds.length === 0) {
+            return res.status(400).json({ error: 'Choose at least one Page to assign' });
+        }
+
+        // Source connection = the caller's current workspace (has the token).
+        const ctx = await loadConnection(req, res);
+        if (!ctx) return;
+        const { connection } = ctx;
+
+        // The chosen pages must exist on this connection.
+        const available = (connection.pages || []).map((p) => String(p.id));
+        const invalid = pageIds.filter((id) => !available.includes(String(id)));
+        if (invalid.length) {
+            return res.status(400).json({ error: `Not available on this connection: ${invalid.join(', ')}` });
+        }
+
+        // Authorize: the caller must belong to the target workspace.
+        const { data: membership } = await supabase
+            .from('workspace_members')
+            .select('role')
+            .eq('workspace_id', targetWorkspaceId)
+            .eq('user_id', req.user.id)
+            .maybeSingle();
+        if (!membership) return res.status(403).json({ error: 'You are not a member of that workspace' });
+
+        // Copy the credentials + full Page list into the target workspace, with
+        // only the chosen Pages selected there. Reuses the same encrypted token.
+        const { error } = await supabase
+            .from('meta_connections')
+            .upsert({
+                workspace_id: targetWorkspaceId,
+                user_id: req.user.id,
+                connection_type: connection.connection_type || 'api_key',
+                meta_user_id: connection.meta_user_id,
+                access_token: connection.access_token, // already encrypted in the row
+                token_expires_at: connection.token_expires_at,
+                pages: connection.pages || [],
+                selected_page_ids: pageIds.map(String),
+                is_active: true,
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'workspace_id' });
+        if (error) throw error;
+
+        console.log(`🔗 [Meta] Assigned ${pageIds.length} page(s) to workspace ${targetWorkspaceId}`);
+        res.json({ success: true, assignedPages: pageIds.length });
+    } catch (error) {
+        console.error('Assign pages error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
  * Choose which Pages to connect
  * POST /api/meta/pages/select   body: { pageIds: string[] }
  *
@@ -552,6 +677,33 @@ router.post('/pages/select', async (req, res) => {
         const invalid = pageIds.filter((id) => !available.includes(String(id)));
         if (invalid.length) {
             return res.status(400).json({ error: `Not available on this connection: ${invalid.join(', ')}` });
+        }
+
+        // Plan cap on connected accounts. Count a Page plus its linked IG each
+        // as one account (mirrors the dashboard targets). Project the new total
+        // by swapping this connection's old selection for the new one. Any
+        // failure here fails OPEN — never block the core connect flow on billing.
+        try {
+            const pageById = new Map((ctx.connection.pages || []).map((p) => [String(p.id), p]));
+            const countFor = (ids) => {
+                const sel = (ids || []).map(String);
+                return sel.length + sel.filter((id) => pageById.get(id)?.instagram_business_account).length;
+            };
+            const ent = await getEntitlement(req.user.id);
+            const limit = ent.limits.accounts;
+            if (limit !== null && limit !== undefined) {
+                const projected = ent.usage.accounts
+                    - countFor(ctx.connection.selected_page_ids)
+                    + countFor(pageIds);
+                if (projected > limit) {
+                    return res.status(402).json({
+                        error: `Your plan allows ${limit} social accounts. Upgrade to connect more.`,
+                        code: 'PLAN_LIMIT',
+                    });
+                }
+            }
+        } catch (e) {
+            console.error('[Meta] account-cap check skipped:', e.message);
         }
 
         const { error } = await supabase
@@ -680,6 +832,9 @@ router.post('/posts/publish', async (req, res) => {
             return res.status(400).json({ error: 'pageId and content are required' });
         }
 
+        if (await billingBlocksPublishing(req, res)) return;
+        if (await dailyCapBlocks(req, res, pageId)) return;
+
         const ctx = await loadConnection(req, res);
         if (!ctx) return;
 
@@ -782,6 +937,9 @@ router.post('/posts/schedule', async (req, res) => {
             return res.status(400).json({ error: 'pageId, content, and scheduledTime are required' });
         }
 
+        if (await billingBlocksPublishing(req, res)) return;
+        if (await dailyCapBlocks(req, res, pageId)) return;
+
         if (platforms.includes('instagram') && (!mediaUrls || mediaUrls.length === 0)) {
             return res.status(400).json({
                 error: 'Instagram posts require at least one image or video.'
@@ -818,6 +976,69 @@ router.post('/posts/schedule', async (req, res) => {
             });
         }
 
+        // Native Facebook scheduling: hand the post to Meta directly so Meta
+        // holds and publishes it, independent of our server. Only possible for
+        // Facebook-only posts (Instagram has no scheduling API) and only inside
+        // Meta's 10-minutes-to-75-days window. Anything else stays on our
+        // server-side scheduler ('pending').
+        const TEN_MIN_MS = 10 * 60 * 1000;
+        const SEVENTY_FIVE_DAYS_MS = 75 * 24 * 60 * 60 * 1000;
+        const facebookOnly = platforms.includes('facebook') && !platforms.includes('instagram');
+        const ahead = when.getTime() - Date.now();
+        const nativeEligible = facebookOnly && ahead >= TEN_MIN_MS && ahead <= SEVENTY_FIVE_DAYS_MS;
+
+        if (nativeEligible) {
+            const ctx = await loadConnection(req, res);
+            if (!ctx) return;
+
+            const tokenResult = await ctx.metaService.getPageToken(pageId);
+            if (!tokenResult.success) return handleMetaError(res, req.workspaceId, tokenResult);
+            const { pageAccessToken } = tokenResult;
+
+            const sched = await ctx.metaService.schedulePost(pageId, pageAccessToken, {
+                message: content,
+                link: linkUrl,
+                mediaUrls: mediaUrls || [],
+                scheduledTime,
+            });
+            if (!sched.success) return handleMetaError(res, req.workspaceId, sched);
+
+            const metaPostId = sched.data.post_id || sched.data.id || null;
+
+            const { data: scheduledPost, error } = await supabase
+                .from('scheduled_posts')
+                .insert({
+                    workspace_id: req.workspaceId,
+                    user_id: userId,
+                    meta_connection_id: connection.id,
+                    page_id: pageId,
+                    page_name: page.name,
+                    platforms,
+                    content,
+                    media_urls: mediaUrls || [],
+                    link_url: linkUrl || null,
+                    scheduled_time: scheduledTime,
+                    timezone: timezone || 'UTC',
+                    status: 'scheduled', // held by Meta; our scheduler ignores it
+                    meta_post_id: metaPostId,
+                    publish_results: { facebook: { scheduled: true, postId: metaPostId } },
+                })
+                .select()
+                .single();
+            if (error) throw error;
+
+            console.log(`📅 Post scheduled ON META for ${scheduledTime} on ${page.name} (id ${metaPostId})`);
+
+            return res.json({
+                success: true,
+                native: true,
+                message: 'Scheduled on Facebook. Meta will publish it at the set time.',
+                post: scheduledPost,
+            });
+        }
+
+        // Server-side path: our scheduler publishes at the due time. This is the
+        // only option for Instagram, mixed FB+IG, or times inside 10 minutes.
         const { data: scheduledPost, error } = await supabase
             .from('scheduled_posts')
             .insert({
@@ -839,11 +1060,14 @@ router.post('/posts/schedule', async (req, res) => {
 
         if (error) throw error;
 
-        console.log(`📅 Post scheduled for ${scheduledTime} on ${page.name} → ${platforms.join(', ')}`);
+        console.log(`📅 Post scheduled (server-side) for ${scheduledTime} on ${page.name} → ${platforms.join(', ')}`);
 
         res.json({
             success: true,
-            message: 'Post scheduled successfully',
+            native: false,
+            message: platforms.includes('instagram')
+                ? 'Post scheduled. Instagram has no native scheduling, so it publishes from our scheduler at the set time.'
+                : 'Post scheduled successfully',
             post: scheduledPost
         });
 
@@ -860,13 +1084,16 @@ router.post('/posts/schedule', async (req, res) => {
 router.get('/posts/scheduled', async (req, res) => {
     try {
         const userId = req.user.id;
-        const { status, limit = 50 } = req.query;
+        const { status, limit = 200 } = req.query;
 
+        // Descending so upcoming/scheduled posts (latest scheduled_time) come
+        // first and are never truncated by the row cap — a past bug hid future
+        // posts behind a wall of older published rows under ascending+limit.
         let query = supabase
             .from('scheduled_posts')
             .select('*')
             .eq('workspace_id', req.workspaceId)
-            .order('scheduled_time', { ascending: true })
+            .order('scheduled_time', { ascending: false })
             .limit(parseInt(limit, 10));
 
         if (status) {
@@ -876,6 +1103,22 @@ router.get('/posts/scheduled', async (req, res) => {
         const { data: posts, error } = await query;
 
         if (error) throw error;
+
+        // Reconcile native 'scheduled' rows whose time has passed: Meta has
+        // published them by now (there is no callback), so reflect that instead
+        // of showing them as forever-upcoming.
+        const now = Date.now();
+        const published = (posts || []).filter(
+            (p) => p.status === 'scheduled' && new Date(p.scheduled_time).getTime() <= now,
+        );
+        if (published.length) {
+            const ids = published.map((p) => p.id);
+            await supabase
+                .from('scheduled_posts')
+                .update({ status: 'published', published_at: new Date().toISOString() })
+                .in('id', ids);
+            for (const p of published) { p.status = 'published'; p.published_at = new Date().toISOString(); }
+        }
 
         res.json({ success: true, posts: posts || [] });
 
@@ -1090,6 +1333,36 @@ router.delete('/posts/:id', async (req, res) => {
             if (error) throw error;
             return deleted?.length > 0;
         };
+
+        // Natively scheduled on Meta: it sits in Meta's own publish queue, so it
+        // must be deleted on Meta first — dropping only our row would leave Meta
+        // to publish it anyway at the set time.
+        if (post.status === 'scheduled') {
+            const ctx = await loadConnection(req, res);
+            if (!ctx) return;
+
+            const tokenResult = await ctx.metaService.getPageToken(post.page_id);
+            if (!tokenResult.success) return handleMetaError(res, req.workspaceId, tokenResult);
+
+            if (post.meta_post_id) {
+                const deletion = await ctx.metaService.deletePost(post.meta_post_id, tokenResult.pageAccessToken);
+                if (!deletion.success) {
+                    return res.status(502).json({
+                        error: `Could not cancel the post on Facebook: ${deletion.error}`,
+                    });
+                }
+            }
+            if (!await dropRow()) {
+                return res.status(409).json({
+                    error: 'This post changed while you were deleting it. Reload and try again.'
+                });
+            }
+            return res.json({
+                success: true,
+                removedFromMeta: ['facebook'],
+                message: 'Scheduled post cancelled on Facebook',
+            });
+        }
 
         // Nothing is live on Meta — the row is the entire post.
         if (post.status !== 'published') {

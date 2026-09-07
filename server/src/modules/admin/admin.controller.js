@@ -579,3 +579,77 @@ export const notifyUser = async (req, res) => {
         res.status(500).json({ success: false, error: 'Failed to send the notification' });
     }
 };
+
+/** GET /api/admin/plans — full plan catalog (incl. Razorpay ids) for editing. */
+export const getAdminPlans = async (req, res) => {
+    try {
+        const { data, error } = await supabaseAdmin
+            .from('subscription_plans')
+            .select('*')
+            .order('sort_order', { ascending: true });
+        if (error) throw error;
+        res.json({ success: true, plans: data || [] });
+    } catch (err) {
+        console.error('[admin] plans failed:', err);
+        res.status(500).json({ success: false, error: 'Failed to load plans' });
+    }
+};
+
+/**
+ * PUT /api/admin/plans/:planKey
+ * Edit prices (paise), limits, features (string[]), Razorpay plan ids, active.
+ */
+export const updateAdminPlan = async (req, res) => {
+    try {
+        const patch = { updated_at: new Date().toISOString() };
+        const b = req.body || {};
+        const intFields = ['monthly_price', 'yearly_price', 'included_accounts', 'included_users', 'included_workspaces', 'daily_post_limit', 'sort_order'];
+        for (const f of intFields) {
+            if (b[f] !== undefined) patch[f] = b[f] === null ? null : parseInt(b[f], 10);
+        }
+        if (b.name !== undefined) patch.name = String(b.name);
+        if (b.tagline !== undefined) patch.tagline = String(b.tagline);
+        if (b.features !== undefined) patch.features = Array.isArray(b.features) ? b.features : [];
+        if (b.highlighted !== undefined) patch.highlighted = Boolean(b.highlighted);
+        if (b.is_active !== undefined) patch.is_active = Boolean(b.is_active);
+        if (b.razorpay_plan_id_monthly !== undefined) patch.razorpay_plan_id_monthly = b.razorpay_plan_id_monthly || null;
+        if (b.razorpay_plan_id_yearly !== undefined) patch.razorpay_plan_id_yearly = b.razorpay_plan_id_yearly || null;
+
+        const { data, error } = await supabaseAdmin
+            .from('subscription_plans')
+            .update(patch)
+            .eq('plan_key', req.params.planKey)
+            .select('*')
+            .single();
+        if (error) throw error;
+        res.json({ success: true, plan: data });
+    } catch (err) {
+        console.error('[admin] update plan failed:', err);
+        res.status(500).json({ success: false, error: 'Failed to update the plan' });
+    }
+};
+
+/** GET /api/admin/subscriptions — platform-wide subscriptions, newest first. */
+export const getAdminSubscriptions = async (req, res) => {
+    try {
+        const { data, error } = await supabaseAdmin
+            .from('subscriptions')
+            .select('id, user_id, plan_key, interval, status, trial_ends_at, current_period_end, created_at')
+            .order('created_at', { ascending: false })
+            .limit(100);
+        if (error) throw error;
+
+        const userMap = await usersById((data || []).map((s) => s.user_id));
+        res.json({
+            success: true,
+            subscriptions: (data || []).map((s) => ({
+                ...s,
+                userName: userMap[s.user_id]?.name || 'Unknown',
+                userEmail: userMap[s.user_id]?.email || null,
+            })),
+        });
+    } catch (err) {
+        console.error('[admin] subscriptions failed:', err);
+        res.status(500).json({ success: false, error: 'Failed to load subscriptions' });
+    }
+};

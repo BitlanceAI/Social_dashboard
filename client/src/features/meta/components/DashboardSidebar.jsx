@@ -8,12 +8,12 @@ import { useTheme } from '@/shared/context/ThemeContext';
 import {
     UserCircle,
     HardDrive,
-    CalendarClock,
     Send,
     BarChart3,
     PenSquare,
     LogOut,
     ShieldCheck,
+    CreditCard,
     Sun,
     Moon,
 } from 'lucide-react';
@@ -33,7 +33,6 @@ const NAV = [
     { id: 'create', label: 'Create a Post', short: 'Create', icon: PenSquare, needsConnection: false },
     { id: 'profiles', label: 'Social Profiles', short: 'Profiles', icon: UserCircle, needsConnection: false },
     { id: 'library', label: 'Media Library', short: 'Library', icon: HardDrive, needsConnection: false },
-    { id: 'scheduled', label: 'Scheduled Posts', short: 'Queue', icon: CalendarClock, needsConnection: true },
     { id: 'history', label: 'Post History', short: 'History', icon: Send, needsConnection: true },
     { id: 'analytics', label: 'Analytics', short: 'Stats', icon: BarChart3, needsConnection: true },
 ];
@@ -116,6 +115,10 @@ const DashboardSidebar = ({
                     {theme === 'dark' ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
                     {theme === 'dark' ? 'Light mode' : 'Dark mode'}
                 </button>
+                <Link to="/billing" className={footerLink}>
+                    <CreditCard className="h-4 w-4 shrink-0" />
+                    Billing & plan
+                </Link>
                 <Link to="/data-deletion" className={footerLink}>
                     <ShieldCheck className="h-4 w-4 shrink-0" />
                     Your data

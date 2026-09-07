@@ -5,7 +5,11 @@ import {
     getOverview, getUsers, createUser, getConnections,
     getStorageSettings, updateStorageSettings, getStoragePurchases,
     getPosts, getPushTokens, getHealth, notifyUser,
+    getAdminPlans, updateAdminPlan, getAdminSubscriptions,
 } from './admin.controller.js';
+import {
+    adminGetCalendar, adminSetDate, adminRemoveDate,
+} from '../occasions/occasions.controller.js';
 
 const router = express.Router();
 
@@ -23,5 +27,11 @@ router.get('/posts', getPosts);
 router.get('/push-tokens', getPushTokens);
 router.get('/health', getHealth);
 router.post('/notify-user', notifyUser);
+router.get('/plans', getAdminPlans);
+router.put('/plans/:planKey', updateAdminPlan);
+router.get('/subscriptions', getAdminSubscriptions);
+router.get('/occasions', adminGetCalendar);
+router.put('/occasions/:slug/:year', adminSetDate);
+router.delete('/occasions/:slug/:year', adminRemoveDate);
 
 export default router;

@@ -1,5 +1,6 @@
 import React from 'react';
-import { PenLine, Zap, Images, Clock, ArrowRight, Link2 } from 'lucide-react';
+import { Zap, Images, Clock, ArrowRight, Link2, Sparkles } from 'lucide-react';
+import OccasionStrip from '@/features/occasions/components/OccasionStrip';
 
 /**
  * Create-a-post hub.
@@ -25,22 +26,25 @@ const MODES = [
         body: 'Compose and send it straight to Facebook and Instagram, no waiting.',
         available: true,
     },
-];
-
-const UPCOMING = [
     {
+        id: 'template',
+        icon: Sparkles,
+        title: 'Create from a Template',
+        body: 'Pick a ready-made design, fill in a few details, and generate a post image.',
+        available: true,
+    },
+    {
+        id: 'bulk',
         icon: Images,
         title: 'Bulk upload (CSV)',
-        body: 'Queue many posts at once from a spreadsheet.',
-    },
-    {
-        icon: PenLine,
-        title: 'AI-assisted drafting',
-        body: 'Generate captions and variations from a prompt.',
+        body: 'Queue many posts at once from a spreadsheet — one row per post.',
+        available: true,
     },
 ];
 
-const CreatePostHub = ({ isConnected, onSelect, onConnect }) => (
+const UPCOMING = [];
+
+const CreatePostHub = ({ isConnected, onSelect, onConnect, onPickOccasion }) => (
     <div>
         <div className="text-center mb-8">
             <h2 className="font-['Space_Grotesk'] text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--text)] mb-2">
@@ -50,6 +54,8 @@ const CreatePostHub = ({ isConnected, onSelect, onConnect }) => (
                 Choose how you want to publish.
             </p>
         </div>
+
+        {isConnected && onPickOccasion && <OccasionStrip onPick={onPickOccasion} />}
 
         {!isConnected && (
             <div className="mb-8 rounded-2xl border border-[var(--accent)] bg-[var(--accent-muted)] px-5 py-4 flex flex-wrap items-center justify-between gap-3">
@@ -89,6 +95,7 @@ const CreatePostHub = ({ isConnected, onSelect, onConnect }) => (
             ))}
         </div>
 
+        {UPCOMING.length > 0 && (
         <div className="mt-12">
             <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--muted)] mb-4">
                 Not built yet
@@ -111,6 +118,7 @@ const CreatePostHub = ({ isConnected, onSelect, onConnect }) => (
                 ))}
             </div>
         </div>
+        )}
     </div>
 );
 

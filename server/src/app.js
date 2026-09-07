@@ -20,6 +20,11 @@ import workspaceRoutes from './modules/workspace/workspace.routes.js';
 import pushRoutes from './modules/push/push.routes.js';
 import adminRoutes from './modules/admin/admin.routes.js';
 import storageRoutes from './modules/storage/storage.routes.js';
+import billingRoutes from './modules/billing/billing.routes.js';
+import templatesRoutes from './modules/templates/templates.routes.js';
+import designRoutes from './modules/design/design.routes.js';
+import occasionsRoutes from './modules/occasions/occasions.routes.js';
+import aiRoutes from './modules/ai/ai.routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -51,6 +56,11 @@ app.use('/api/workspaces', workspaceRoutes); // membership, roles, invites
 app.use('/api/push', pushRoutes); // web push registration (FCM)
 app.use('/api/admin', adminRoutes); // platform administration (role='admin' only)
 app.use('/api/storage', storageRoutes); // paid media storage (Razorpay)
+app.use('/api/billing', billingRoutes); // subscription plans + billing (Razorpay Subscriptions)
+app.use('/api/templates', templatesRoutes); // graphic template catalog + admin CRUD
+app.use('/api/design', designRoutes); // template-based image generation jobs
+app.use('/api/occasions', occasionsRoutes); // Indian occasion calendar (dates resolved server-side)
+app.use('/api/ai', aiRoutes); // AI copywriting (post captions via Perplexity)
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date() });

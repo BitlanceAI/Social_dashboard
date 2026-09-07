@@ -53,6 +53,11 @@ export const updateStorageSettings = ({ pricePerGbMonth, deleteAfterDays }) =>
 
 export const fetchStoragePurchases = () => request('/storage/purchases');
 
+export const fetchAdminPlans = () => request('/plans');
+export const updateAdminPlan = (planKey, patch) =>
+    request(`/plans/${planKey}`, { method: 'PUT', body: patch });
+export const fetchAdminSubscriptions = () => request('/subscriptions');
+
 export const fetchPosts = ({ page = 1, per = 20, status = '' } = {}) => {
     const params = new URLSearchParams({ page, per });
     if (status) params.set('status', status);
@@ -65,3 +70,32 @@ export const fetchHealth = () => request('/health');
 
 export const notifyUser = ({ userId, title, body }) =>
     request('/notify-user', { method: 'POST', body: { userId, title, body } });
+
+// Graphic templates live under /api/templates/admin, not /api/admin.
+const templatesRequest = async (path, { method = 'GET', body } = {}) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { const err = new Error('Not signed in'); err.status = 401; throw err; }
+
+    const res = await fetch(`${API_BASE_URL}/api/templates${path}`, {
+        method,
+        headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) { const err = new Error(payload.error || `Request failed (${res.status})`); err.status = res.status; throw err; }
+    return payload;
+};
+
+export const fetchAdminTemplates = () => templatesRequest('/admin');
+export const createTemplate = (body) => templatesRequest('/admin', { method: 'POST', body });
+export const updateTemplate = (key, body) => templatesRequest(`/admin/${key}`, { method: 'PUT', body });
+export const deleteTemplate = (key) => templatesRequest(`/admin/${key}`, { method: 'DELETE' });
+
+export const fetchOccasions = (year) => request(`/occasions?year=${year}`);
+export const saveOccasionDate = (slug, year, { date, name, notes }) =>
+    request(`/occasions/${slug}/${year}`, { method: 'PUT', body: { date, name, notes } });
+export const deleteOccasionDate = (slug, year) =>
+    request(`/occasions/${slug}/${year}`, { method: 'DELETE' });

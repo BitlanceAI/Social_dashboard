@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshCw, Plus, LogOut, AlertTriangle, Settings2 } from 'lucide-react';
+import { RefreshCw, Plus, LogOut, AlertTriangle, Building2 } from 'lucide-react';
 import { platformMeta } from '@/features/meta/lib/providers';
 
 /**
@@ -18,11 +18,10 @@ const SocialProfilesPanel = ({
     targets = [],
     metaScopes = null,
     instagramAccounts = [],
-    hiddenInstagram = [],
     linkedinConnection,
     postCounts = {},
     onAddProfile,
-    onManagePages,
+    onAssignPages,
     onRefresh,
     onRemoveTarget,
     refreshing,
@@ -54,6 +53,15 @@ const SocialProfilesPanel = ({
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {onAssignPages && (
+                        <button
+                            onClick={onAssignPages}
+                            className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-[var(--border)] text-xs text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                        >
+                            <Building2 className="h-3.5 w-3.5" />
+                            Assign to workspace
+                        </button>
+                    )}
                     {isConnected && (
                         <button
                             onClick={onRefresh}
@@ -121,30 +129,6 @@ const SocialProfilesPanel = ({
                         className="shrink-0 px-4 py-2 rounded-full border border-[var(--border)] text-xs text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
                     >
                         Reconnect
-                    </button>
-                </div>
-            )}
-
-            {/* An Instagram account whose Facebook Page is not enabled here can
-                never be published to — the app targets IG through its Page. Say
-                so, with the fix one click away. */}
-            {hiddenInstagram.length > 0 && (
-                <div className="flex items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-amber-500" />
-                    <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-[var(--text)]">
-                            {hiddenInstagram.length} Instagram account{hiddenInstagram.length === 1 ? '' : 's'} not enabled
-                        </p>
-                        <p className="text-[12px] text-[var(--muted)] leading-relaxed mt-0.5">
-                            {hiddenInstagram.map((ig) => `@${ig.username || 'account'} (via ${ig.pageName})`).join(', ')}
-                            {' — '}enable {hiddenInstagram.length === 1 ? 'its' : 'their'} Facebook Page below to publish to {hiddenInstagram.length === 1 ? 'it' : 'them'}.
-                        </p>
-                    </div>
-                    <button
-                        onClick={onManagePages}
-                        className="shrink-0 px-4 py-2 rounded-full border border-[var(--border)] text-xs text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
-                    >
-                        Choose Pages
                     </button>
                 </div>
             )}
@@ -304,15 +288,6 @@ const SocialProfilesPanel = ({
                 </div>
             )}
 
-            {targets.length > 0 && (
-                <button
-                    onClick={onManagePages}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-[var(--border)] text-xs text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
-                >
-                    <Settings2 className="h-3.5 w-3.5" />
-                    Choose which Facebook Pages to use
-                </button>
-            )}
         </div>
     );
 };

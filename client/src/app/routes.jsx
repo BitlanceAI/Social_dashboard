@@ -8,11 +8,13 @@ const LoginPage        = lazy(() => import('@/features/auth/pages/LoginPage'));
 const SignupPage       = lazy(() => import('@/features/auth/pages/SignupPage'));
 const MetaDashboardPage = lazy(() => import('@/features/meta/pages/MetaDashboardPage'));
 const LandingPage      = lazy(() => import('@/features/marketing/pages/LandingPage'));
+const PricingPage      = lazy(() => import('@/features/marketing/pages/PricingPage'));
 const PrivacyPolicy    = lazy(() => import('@/features/legal/pages/PrivacyPolicy'));
 const TermsPage        = lazy(() => import('@/features/legal/pages/TermsPage'));
 const DataDeletionPage = lazy(() => import('@/features/legal/pages/DataDeletionPage'));
 const AdminPanelPage   = lazy(() => import('@/features/admin/pages/AdminPanelPage'));
 const StoragePage      = lazy(() => import('@/features/storage/pages/StoragePage'));
+const BillingPage      = lazy(() => import('@/features/billing/pages/BillingPage'));
 
 const guarded = (element) => <AuthGuard>{element}</AuthGuard>;
 
@@ -36,6 +38,9 @@ export const routes = [
   // Paid media storage (Razorpay)
   { path: '/storage', element: guarded(<StoragePage />) },
 
+  // Subscription billing (Razorpay)
+  { path: '/billing', element: guarded(<BillingPage />) },
+
   // Legal — linked from the Meta app dashboard; both are required for Meta App Review
   { path: '/privacy-policy', element: <PrivacyPolicy /> },
   { path: '/terms-policy',   element: <TermsPage /> },
@@ -43,6 +48,7 @@ export const routes = [
 
   // Marketing
   { path: '/', element: <LandingPage /> },
+  { path: '/pricing', element: <PricingPage /> },
   { path: '*', element: <Navigate to="/" replace /> },
 ];
 

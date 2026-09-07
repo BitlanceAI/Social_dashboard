@@ -218,6 +218,7 @@ const handleLinkedInError = async (res, workspaceId, errorResult) => {
 /** Author URNs this connection may post as. Organizations stay empty until approved. */
 const actorsFor = (connection) => {
     const actors = [];
+    const seen = new Set(); // one card per URN — never list the same actor twice
 
     if (connection.author_urn) {
         actors.push({
@@ -226,11 +227,14 @@ const actorsFor = (connection) => {
             type: 'member',
             avatarUrl: connection.avatar_url || null,
         });
+        seen.add(connection.author_urn);
     }
 
     const selected = connection.selected_org_ids;
     for (const org of connection.organizations || []) {
         if (Array.isArray(selected) && !selected.includes(org.urn)) continue;
+        if (!org.urn || seen.has(org.urn)) continue; // skip dupes (incl. member===org)
+        seen.add(org.urn);
         actors.push({ urn: org.urn, name: org.name, type: 'org', avatarUrl: org.avatarUrl || null });
     }
 

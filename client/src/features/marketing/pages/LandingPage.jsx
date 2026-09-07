@@ -193,7 +193,7 @@ const LandingPage = () => {
     return (
         <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
             <header className="sticky top-0 z-10 bg-[var(--bg)]/95 backdrop-blur px-6 py-4 border-b border-[var(--border)]">
-                <div className="max-w-4xl mx-auto flex items-center justify-between">
+                <div className="max-w-6xl mx-auto flex items-center justify-between">
                     <Link to="/" className="flex items-center">
                         <Logo className="h-7" />
                     </Link>
@@ -209,6 +209,12 @@ const LandingPage = () => {
                                 </a>
                             )
                         )}
+                        <Link
+                            to="/pricing"
+                            className="hidden md:inline px-3 py-1.5 rounded-full text-[10px] font-mono uppercase tracking-widest text-[var(--muted)] hover:text-[var(--accent)] hover:bg-[var(--surface)] transition-colors"
+                        >
+                            Pricing
+                        </Link>
                         <button
                             onClick={toggleTheme}
                             aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
@@ -226,7 +232,7 @@ const LandingPage = () => {
                 </div>
             </header>
 
-            <main className="max-w-4xl mx-auto px-6">
+            <main className="max-w-6xl mx-auto px-6">
                 {/* ── Hero ── */}
                 <section className="py-24">
                     <div className="inline-flex items-center gap-3 mb-8 px-4 py-2 rounded-full border border-[var(--border)] bg-[var(--surface)]">
@@ -237,16 +243,16 @@ const LandingPage = () => {
                         </span>
                     </div>
 
-                    <h1 className="font-['Space_Grotesk'] text-4xl sm:text-5xl font-extrabold tracking-tight leading-[1.1] mb-6 max-w-3xl">
+                    <h1 className="font-['Space_Grotesk'] text-5xl sm:text-6xl font-black tracking-tight leading-[1.1] mb-6 max-w-3xl">
                         Stop posting the same thing twice.
                     </h1>
 
-                    <p className="text-[var(--muted)] text-base sm:text-lg leading-relaxed mb-4 max-w-2xl">
+                    <p className="text-[var(--muted)] text-lg sm:text-xl font-medium leading-relaxed mb-4 max-w-2xl">
                         Bitlance is a publishing tool for people who run a Facebook Page and an
                         Instagram Business account. Write the post once, send it to either network
                         or both, schedule it, and see exactly what published.
                     </p>
-                    <p className="text-[var(--muted)] text-sm leading-relaxed mb-10 max-w-2xl">
+                    <p className="text-[var(--muted)] text-base leading-relaxed mb-10 max-w-2xl">
                         No password sharing, no browser extensions, no third-party relay — just the
                         official Meta Graph API.
                     </p>
@@ -263,7 +269,7 @@ const LandingPage = () => {
                 {/* ── Before / After ── */}
                 <section className="border-t border-[var(--border)] py-20">
                     <Eyebrow>The problem</Eyebrow>
-                    <h2 className="font-['Space_Grotesk'] text-2xl sm:text-3xl font-extrabold tracking-tight mb-4">
+                    <h2 className="font-['Space_Grotesk'] text-3xl sm:text-4xl font-black tracking-tight mb-4">
                         Two networks, one piece of content, twice the work.
                     </h2>
                     <p className="text-[var(--muted)] text-sm leading-relaxed mb-10 max-w-2xl">
@@ -304,7 +310,7 @@ const LandingPage = () => {
                 {/* ── How it works ── */}
                 <section id="how" className="scroll-mt-20 border-t border-[var(--border)] py-20">
                     <Eyebrow>How it works</Eyebrow>
-                    <h2 className="font-['Space_Grotesk'] text-2xl sm:text-3xl font-extrabold tracking-tight mb-4">
+                    <h2 className="font-['Space_Grotesk'] text-3xl sm:text-4xl font-black tracking-tight mb-4">
                         From draft to published, in four stages.
                     </h2>
                     <p className="text-[var(--muted)] text-sm leading-relaxed mb-12 max-w-2xl">
@@ -337,7 +343,7 @@ const LandingPage = () => {
                 {/* ── Features ── */}
                 <section id="features" className="scroll-mt-20 border-t border-[var(--border)] py-20">
                     <Eyebrow>Features</Eyebrow>
-                    <h2 className="font-['Space_Grotesk'] text-2xl sm:text-3xl font-extrabold tracking-tight mb-12">
+                    <h2 className="font-['Space_Grotesk'] text-3xl sm:text-4xl font-black tracking-tight mb-12">
                         Built around the parts that usually break.
                     </h2>
 
@@ -362,7 +368,7 @@ const LandingPage = () => {
                 {/* ── Formats ── */}
                 <section id="formats" className="scroll-mt-20 border-t border-[var(--border)] py-20">
                     <Eyebrow>Formats</Eyebrow>
-                    <h2 className="font-['Space_Grotesk'] text-2xl sm:text-3xl font-extrabold tracking-tight mb-4">
+                    <h2 className="font-['Space_Grotesk'] text-3xl sm:text-4xl font-black tracking-tight mb-4">
                         What you can publish, and where.
                     </h2>
                     <p className="text-[var(--muted)] text-sm leading-relaxed mb-10 max-w-2xl">
@@ -412,7 +418,7 @@ const LandingPage = () => {
                 {/* ── Who it's for ── */}
                 <section className="border-t border-[var(--border)] py-20">
                     <Eyebrow>Who it&apos;s for</Eyebrow>
-                    <h2 className="font-['Space_Grotesk'] text-2xl sm:text-3xl font-extrabold tracking-tight mb-12">
+                    <h2 className="font-['Space_Grotesk'] text-3xl sm:text-4xl font-black tracking-tight mb-12">
                         A good fit if this sounds familiar.
                     </h2>
 
@@ -452,7 +458,7 @@ const LandingPage = () => {
                 {/* ── FAQ ── */}
                 <section id="faq" className="scroll-mt-20 border-t border-[var(--border)] py-20">
                     <Eyebrow>FAQ</Eyebrow>
-                    <h2 className="font-['Space_Grotesk'] text-2xl sm:text-3xl font-extrabold tracking-tight mb-12">
+                    <h2 className="font-['Space_Grotesk'] text-3xl sm:text-4xl font-black tracking-tight mb-12">
                         Questions people actually ask.
                     </h2>
 
@@ -469,7 +475,7 @@ const LandingPage = () => {
                 {/* ── Closing CTA ── */}
                 <section className="border-t border-[var(--border)] py-20">
                     <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-10 sm:p-12">
-                        <h2 className="font-['Space_Grotesk'] text-2xl sm:text-3xl font-extrabold tracking-tight mb-4 max-w-2xl">
+                        <h2 className="font-['Space_Grotesk'] text-3xl sm:text-4xl font-black tracking-tight mb-4 max-w-2xl">
                             Write it once. Publish it everywhere it belongs.
                         </h2>
                         <p className="text-[var(--muted)] text-sm leading-relaxed mb-8 max-w-xl">
@@ -485,10 +491,11 @@ const LandingPage = () => {
             </main>
 
             <footer className="border-t border-[var(--border)] px-6 py-8">
-                <div className="max-w-4xl mx-auto flex flex-wrap items-center gap-x-6 gap-y-2">
+                <div className="max-w-6xl mx-auto flex flex-wrap items-center gap-x-6 gap-y-2">
                     <span className="text-[10px] font-mono uppercase tracking-widest text-[var(--muted)]">
                         &copy; {new Date().getFullYear()} Bitlance
                     </span>
+                    <Link to="/pricing" className={FOOTER_LINK}>Pricing</Link>
                     <Link to="/privacy-policy" className={FOOTER_LINK}>Privacy Policy</Link>
                     <Link to="/terms-policy" className={FOOTER_LINK}>Terms of Service</Link>
                     <Link to="/data-deletion" className={FOOTER_LINK}>Data Deletion</Link>

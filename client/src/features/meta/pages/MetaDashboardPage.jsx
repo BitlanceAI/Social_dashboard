@@ -34,7 +34,6 @@ import {
     Unlink,
     ExternalLink,
     X,
-    Calendar,
     Image,
     Send,
     FileText,
@@ -61,6 +60,9 @@ import API_BASE_URL from '@/shared/config';
 
 import DashboardSidebar, { DashboardMobileNav } from '@/features/meta/components/DashboardSidebar';
 import CommentsModal from '@/features/meta/components/CommentsModal';
+import AssignPagesModal from '@/features/meta/components/AssignPagesModal';
+import GraphicTemplatesModal from '@/features/templates/components/GraphicTemplatesModal';
+import BulkUploadModal from '@/features/meta/components/BulkUploadModal';
 
 // Module-scoped, so it survives the StrictMode/dev remount that resets a ref.
 // One OAuth token is completed exactly once, no matter how many times the
@@ -71,7 +73,7 @@ const MetaDashboardView = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const { user } = useAuth();
-    const { activeWorkspaceId } = useWorkspace();
+    const { activeWorkspaceId, workspaces } = useWorkspace();
 
     // Session state (fetched from Supabase)
     const [activeTab, setActiveTab] = useState('create');
@@ -83,12 +85,17 @@ const MetaDashboardView = () => {
     // dashboard is usable with either one on its own.
     const [connection, setConnection] = useState(null);          // Meta
     const [liConnection, setLiConnection] = useState(null);      // LinkedIn
+    const [showBulk, setShowBulk] = useState(false);             // bulk CSV modal
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
     // Modal state
     const [showConnectModal, setShowConnectModal] = useState(false);
     const [showPagePicker, setShowPagePicker] = useState(false);
+    const [showAssignPages, setShowAssignPages] = useState(false);
+    const [showTemplates, setShowTemplates] = useState(false);
+    // When set, the templates modal opens deep-linked to an occasion.
+    const [occasionContext, setOccasionContext] = useState(null);
     const [savingPages, setSavingPages] = useState(false);
     // Guards against a second submit while a publish is in flight
     const [submitting, setSubmitting] = useState(false);
@@ -133,7 +140,7 @@ const MetaDashboardView = () => {
      * Instagram account offers both, which is what replaces the
      * `instagram_business_account` checks previously scattered through the UI.
      */
-    const targets = [
+    const rawTargets = [
         ...(connection?.pages || []).map((page) => ({
             id: String(page.id),
             name: page.name,
@@ -152,6 +159,14 @@ const MetaDashboardView = () => {
             platforms: ['linkedin'],
         })),
     ];
+    // One card per profile — guard against a repeated page/actor slipping through.
+    const seenTargetKeys = new Set();
+    const targets = rawTargets.filter((t) => {
+        const k = `${t.provider}-${t.id}`;
+        if (seenTargetKeys.has(k)) return false;
+        seenTargetKeys.add(k);
+        return true;
+    });
 
     const targetById = (id) => targets.find((t) => t.id === String(id));
 
@@ -309,8 +324,10 @@ const MetaDashboardView = () => {
                     toast.error('Meta session expired. Please reconnect.');
                 }
             }
+            return data;
         } catch (error) {
             console.error('Connection check failed:', error);
+            return null;
         } finally {
             setLoading(false);
         }
@@ -376,7 +393,10 @@ const MetaDashboardView = () => {
     const [platformHistory, setPlatformHistory] = useState(null);
     const [historyFeedErrors, setHistoryFeedErrors] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(false);
-    const [historyPlatform, setHistoryPlatform] = useState('all'); // all | facebook | instagram
+    const [historyPlatform, setHistoryPlatform] = useState('all'); // all | facebook | instagram | linkedin
+    const [historyStatus, setHistoryStatus] = useState('all'); // all | published | scheduled | failed
+    const [historyRange, setHistoryRange] = useState('all'); // all | 24h | 7d | 30d | 90d
+    const [historyNowMs] = useState(() => Date.now()); // stable "now" for range filtering
     // Facebook post whose comment thread is open in the manager modal
     const [commentsPost, setCommentsPost] = useState(null);
 
@@ -400,8 +420,11 @@ const MetaDashboardView = () => {
     };
 
     useEffect(() => {
-        if (activeTab === 'history' && connection && platformHistory === null && !historyLoading) {
-            loadPlatformHistory();
+        if (activeTab === 'history' && connection) {
+            // Post History merges live Meta posts with our tracked scheduled/
+            // failed rows, so both sources load when the tab opens.
+            if (platformHistory === null && !historyLoading) loadPlatformHistory();
+            loadScheduledPosts();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeTab, connection]);
@@ -484,10 +507,15 @@ const MetaDashboardView = () => {
             const data = await response.json();
             console.log('[Meta OAuth] Connect response:', data);
             if (data.success) {
-                toast.success('Meta account connected via Facebook!');
+                // Do NOT announce success yet. After connecting, ALWAYS open the
+                // Page picker so the user chooses (or re-confirms) their Pages —
+                // on a reconnect the server keeps the old selection, so the
+                // picker would not open on its own. The "Connected N profiles"
+                // toast fires only after they save in handleSavePageSelection.
                 await checkConnection();
                 // Clear the URL to preventing token leakage/re-submission
                 window.history.replaceState({}, '', '/socialdashboad');
+                setShowPagePicker(true);
             } else {
                 toast.error(data.error || 'OAuth connection failed');
             }
@@ -740,6 +768,27 @@ const MetaDashboardView = () => {
         }
     };
 
+    // Agency flow: place Pages from this account into another workspace.
+    const handleAssignPages = async (targetWorkspaceId, pageIds) => {
+        setSavingPages(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/meta/pages/assign`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ targetWorkspaceId, pageIds }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.success) throw new Error(data.error || 'Could not assign the Pages');
+            const ws = workspaces.find((w) => w.id === targetWorkspaceId);
+            toast.success(`Assigned ${pageIds.length} Page${pageIds.length === 1 ? '' : 's'} to ${ws?.name || 'the workspace'}`);
+            setShowAssignPages(false);
+        } catch (error) {
+            toast.error(error.message);
+        } finally {
+            setSavingPages(false);
+        }
+    };
+
     const handleDeleteScheduledPost = async (post) => {
         // A published post is live on Meta; a pending one only exists here.
         const isPublished = post?.status === 'published';
@@ -777,6 +826,7 @@ const MetaDashboardView = () => {
             PAUSED: { icon: PauseCircle, color: 'text-amber-500', bg: 'bg-amber-500/10', label: 'Paused' },
             SCHEDULED: { icon: Clock, color: 'text-[var(--accent)]', bg: 'bg-[var(--accent-muted)]', label: 'Scheduled' },
             pending: { icon: Clock, color: 'text-[var(--accent)]', bg: 'bg-[var(--accent-muted)]', label: 'Pending' },
+            scheduled: { icon: Clock, color: 'text-[var(--accent)]', bg: 'bg-[var(--accent-muted)]', label: 'Scheduled on Meta' },
             published: { icon: CheckCircle2, color: 'text-[var(--accent)]', bg: 'bg-[var(--accent-muted)]', label: 'Published' },
             failed: { icon: AlertCircle, color: 'text-red-500', bg: 'bg-red-500/10', label: 'Failed' }
         };
@@ -839,9 +889,67 @@ const MetaDashboardView = () => {
         }
     };
 
-    // Scheduled posts split by lifecycle for the two dashboard sections
+    // Scheduled posts split by lifecycle (sidebar counts, notifications)
     const publishedPosts = scheduledPosts.filter(p => p.status === 'published');
     const upcomingPosts = scheduledPosts.filter(p => p.status !== 'published');
+
+    // ── Unified Post History ─────────────────────────────────────────────────
+    // One list, filterable by status and platform. Published FB/IG come from the
+    // live Meta feed (so native posts show too); scheduled/failed rows, plus
+    // LinkedIn (no live feed), come from our tracked scheduled_posts.
+    const liveHistoryItems = (platformHistory || []).map((p) => ({
+        key: `live-${p.id}`,
+        source: 'live',
+        platforms: [p.platform],
+        platform: p.platform,
+        status: 'published',
+        message: p.message,
+        mediaUrl: p.mediaUrl,
+        pageName: p.pageName,
+        when: p.publishedAt,
+        likes: p.likes,
+        comments: p.comments,
+        permalink: p.permalink,
+        raw: p,
+    }));
+
+    const dbHistoryItems = (scheduledPosts || []).flatMap((p) => {
+        const isLinkedIn = p.provider === 'linkedin';
+        const platforms = isLinkedIn
+            ? ['linkedin']
+            : ((p.platforms && p.platforms.length) ? p.platforms : ['facebook']);
+        let status;
+        if (p.status === 'failed') status = 'failed';
+        else if (['pending', 'processing', 'scheduled'].includes(p.status)) status = 'scheduled';
+        else if (p.status === 'published') status = 'published';
+        else return []; // cancelled etc. never surface
+        // Meta published rows would duplicate the live feed — skip them there.
+        if (status === 'published' && !isLinkedIn) return [];
+        return [{
+            key: `db-${p.id}`,
+            source: 'db',
+            platforms,
+            platform: platforms[0],
+            status,
+            message: p.content,
+            mediaUrl: (p.media_urls && p.media_urls[0]) || null,
+            pageName: p.page_name,
+            when: p.published_at || p.scheduled_time,
+            error: p.error_message,
+            raw: p,
+        }];
+    });
+
+    const allHistoryItems = [...liveHistoryItems, ...dbHistoryItems]
+        .sort((a, b) => new Date(b.when) - new Date(a.when));
+    const RANGE_DAYS = { '24h': 1, '7d': 7, '30d': 30, '90d': 90 };
+    const rangeCutoff = historyRange === 'all'
+        ? 0
+        : historyNowMs - RANGE_DAYS[historyRange] * 24 * 60 * 60 * 1000;
+    const filteredHistory = allHistoryItems.filter((it) =>
+        (historyStatus === 'all' || it.status === historyStatus)
+        && (historyPlatform === 'all' || it.platforms.includes(historyPlatform))
+        && (historyRange === 'all' || (it.when && new Date(it.when).getTime() >= rangeCutoff)));
 
     return (
         <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
@@ -897,63 +1005,16 @@ const MetaDashboardView = () => {
                             required: connection.requiredScopes || [],
                         } : null}
                         instagramAccounts={connection?.instagramAccounts || []}
-                        hiddenInstagram={
-                            (connection?.availablePages || [])
-                                .filter((p) => p.instagram_business_account?.id
-                                    && !(connection.selectedPageIds || []).map(String).includes(String(p.id)))
-                                .map((p) => ({
-                                    username: p.instagram_business_account.username,
-                                    pageName: p.name,
-                                }))
-                        }
                         linkedinConnection={liConnection}
                         postCounts={postCounts}
                         onAddProfile={() => setShowConnectModal(true)}
-                        onManagePages={() => setShowPagePicker(true)}
+                        onAssignPages={connection?.availablePages?.length && workspaces.length > 1
+                            ? () => setShowAssignPages(true)
+                            : null}
                         onRefresh={handleRefresh}
                         onRemoveTarget={handleRemoveTarget}
                         refreshing={refreshing}
                     />
-                )}
-
-                {/* Scheduled Posts tab */}
-                {activeTab === 'scheduled' && isConnected && upcomingPosts.length > 0 && (
-                    <div className="bg-[var(--surface)] rounded-3xl border border-[var(--border)] p-5 sm:p-6 mb-6 sm:mb-8">
-                        <h3 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)] mb-4">Scheduled Posts</h3>
-                        <div className="space-y-3">
-                            {upcomingPosts.map(post => {
-                                const statusConfig = getStatusConfig(post.status);
-                                return (
-                                    <div key={post.id} className="flex items-center justify-between p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
-                                        <div className="flex-1">
-                                            <p className="font-medium text-[var(--text)] line-clamp-1">{post.content}</p>
-                                            <div className="flex items-center gap-3 mt-1 text-sm text-[var(--muted)]">
-                                                <span>{post.page_name}</span>
-                                                <span>•</span>
-                                                <span>{new Date(post.scheduled_time).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}</span>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-3">
-                                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${statusConfig.bg} ${statusConfig.color}`}>
-                                                {statusConfig.label}
-                                            </span>
-                                            {['pending', 'published', 'failed'].includes(post.status) && (
-                                                <button
-                                                    onClick={() => handleDeleteScheduledPost(post)}
-                                                    title={post.status === 'published'
-                                                        ? 'Delete this post from Facebook'
-                                                        : 'Remove from history'}
-                                                    className="p-2 rounded-lg hover:bg-red-100 text-red-500 transition-colors"
-                                                >
-                                                    <X className="h-4 w-4" />
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
                 )}
 
                 {/* Post History tab — live feed straight from Meta, so it
@@ -963,7 +1024,7 @@ const MetaDashboardView = () => {
                         <div className="flex items-center justify-between mb-1">
                             <h3 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)]">All Posts</h3>
                             <button
-                                onClick={loadPlatformHistory}
+                                onClick={() => { loadPlatformHistory(); loadScheduledPosts(); }}
                                 disabled={historyLoading}
                                 className="p-2 rounded-xl border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--bg)] transition-colors disabled:opacity-60"
                                 title="Refresh"
@@ -972,37 +1033,56 @@ const MetaDashboardView = () => {
                             </button>
                         </div>
                         <p className="text-xs text-[var(--muted)] mb-4">
-                            Everything published on your connected Pages and Instagram accounts —
-                            whether it was posted through Botlance or natively.
+                            Every post on your connected accounts — published, scheduled, or failed,
+                            posted through Botlance or natively.
                         </p>
 
-                        {/* Platform filter — counts come from the loaded set */}
-                        {platformHistory?.length > 0 && (
-                            <div className="flex flex-wrap items-center gap-2 mb-4">
-                                {[
-                                    { id: 'all', label: 'All' },
-                                    { id: 'facebook', label: 'Facebook' },
-                                    { id: 'instagram', label: 'Instagram' },
-                                ].map(({ id, label }) => {
-                                    const n = id === 'all'
-                                        ? platformHistory.length
-                                        : platformHistory.filter(p => p.platform === id).length;
-                                    return (
-                                        <button
-                                            key={id}
-                                            onClick={() => setHistoryPlatform(id)}
-                                            className={`text-[11px] font-mono px-3 py-1.5 rounded-full transition-colors ${
-                                                historyPlatform === id
-                                                    ? 'bg-[var(--accent)]/15 text-[var(--accent)]'
-                                                    : 'border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]'
-                                            }`}
-                                        >
-                                            {label} · {n}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        )}
+                        {/* Status + platform dropdown filters */}
+                        <div className="flex flex-wrap items-center gap-3 mb-4">
+                            <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                                Status
+                                <select
+                                    value={historyStatus}
+                                    onChange={(e) => setHistoryStatus(e.target.value)}
+                                    className="px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)]"
+                                >
+                                    <option value="all">All</option>
+                                    <option value="published">Published</option>
+                                    <option value="scheduled">Scheduled</option>
+                                    <option value="failed">Failed</option>
+                                </select>
+                            </label>
+                            <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                                Platform
+                                <select
+                                    value={historyPlatform}
+                                    onChange={(e) => setHistoryPlatform(e.target.value)}
+                                    className="px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)]"
+                                >
+                                    <option value="all">All</option>
+                                    <option value="facebook">Facebook</option>
+                                    <option value="instagram">Instagram</option>
+                                    <option value="linkedin">LinkedIn</option>
+                                </select>
+                            </label>
+                            <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                                Date
+                                <select
+                                    value={historyRange}
+                                    onChange={(e) => setHistoryRange(e.target.value)}
+                                    className="px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)]"
+                                >
+                                    <option value="all">All time</option>
+                                    <option value="24h">Last 24 hours</option>
+                                    <option value="7d">Last 7 days</option>
+                                    <option value="30d">Last 30 days</option>
+                                    <option value="90d">Last 90 days</option>
+                                </select>
+                            </label>
+                            <span className="text-[11px] text-[var(--muted-2)]">
+                                {filteredHistory.length} post{filteredHistory.length === 1 ? '' : 's'}
+                            </span>
+                        </div>
 
                         {/* One feed failing must be visible, not silent — this is
                             how "only Instagram shows up" gets diagnosed. */}
@@ -1021,66 +1101,92 @@ const MetaDashboardView = () => {
 
                         {historyLoading && platformHistory === null ? (
                             <div className="py-10 text-center text-sm text-[var(--muted)]">Loading your posts…</div>
-                        ) : !platformHistory?.length ? (
+                        ) : allHistoryItems.length === 0 ? (
                             <div className="py-10 text-center">
                                 <Send className="h-8 w-8 mx-auto mb-3 text-[var(--muted-2)]" />
                                 <p className="text-sm text-[var(--muted)]">
-                                    No posts found on your connected accounts yet.
+                                    No posts on your connected accounts yet.
                                 </p>
                             </div>
+                        ) : filteredHistory.length === 0 ? (
+                            <p className="py-8 text-center text-sm text-[var(--muted)]">
+                                No posts match these filters.
+                            </p>
                         ) : (
-                            <div className="space-y-3">
-                                {platformHistory.filter(p => historyPlatform === 'all' || p.platform === historyPlatform).length === 0 && (
-                                    <p className="py-8 text-center text-sm text-[var(--muted)]">
-                                        No {historyPlatform} posts.
-                                    </p>
-                                )}
-                                {platformHistory.filter(p => historyPlatform === 'all' || p.platform === historyPlatform).map(post => {
-                                    const Icon = platformMeta(post.platform).Icon;
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {filteredHistory.map((it) => {
+                                    const Icon = platformMeta(it.platform).Icon;
+                                    const statusConfig = getStatusConfig(it.status);
                                     return (
                                         <div
-                                            key={post.id}
-                                            className="flex items-start gap-4 p-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)]"
+                                            key={it.key}
+                                            className="flex flex-col gap-3 p-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)]"
                                         >
-                                            {post.mediaUrl && (
-                                                <img
-                                                    src={post.mediaUrl}
-                                                    alt=""
-                                                    loading="lazy"
-                                                    className="w-14 h-14 rounded-xl object-cover border border-[var(--border)] shrink-0"
-                                                />
+                                            <div className="flex items-start gap-3">
+                                                {it.mediaUrl && (
+                                                    <img
+                                                        src={it.mediaUrl}
+                                                        alt=""
+                                                        loading="lazy"
+                                                        className="w-14 h-14 rounded-xl object-cover border border-[var(--border)] shrink-0"
+                                                    />
+                                                )}
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm text-[var(--text)] line-clamp-3 mb-2">
+                                                        {it.message || <span className="text-[var(--muted-2)]">No caption</span>}
+                                                    </p>
+                                                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+                                                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-[var(--accent-muted)] text-[var(--accent)] font-medium">
+                                                            <Icon className="h-3 w-3" />
+                                                            {it.pageName}
+                                                        </span>
+                                                        <span>{it.when ? new Date(it.when).toLocaleString() : ''}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {it.status === 'failed' && it.error && (
+                                                <p className="text-[11px] text-red-500 line-clamp-2">{it.error}</p>
                                             )}
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm text-[var(--text)] line-clamp-2 mb-2">
-                                                    {post.message || <span className="text-[var(--muted-2)]">No caption</span>}
-                                                </p>
-                                                <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
-                                                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-[var(--accent-muted)] text-[var(--accent)] font-medium">
-                                                        <Icon className="h-3 w-3" />
-                                                        {post.pageName}
-                                                    </span>
-                                                    <span>{new Date(post.publishedAt).toLocaleString()}</span>
-                                                    {post.likes !== null && <span>· {post.likes} likes</span>}
-                                                    {post.platform === 'facebook' ? (
+
+                                            <div className="flex items-center justify-between gap-2 mt-auto">
+                                                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium ${statusConfig.bg} ${statusConfig.color}`}>
+                                                    {statusConfig.label}
+                                                </span>
+                                                <div className="flex items-center gap-2 text-[11px]">
+                                                    {it.source === 'live' && it.likes != null && (
+                                                        <span className="text-[var(--muted)]">{it.likes} likes</span>
+                                                    )}
+                                                    {it.source === 'live' && it.platform === 'facebook' && (
                                                         <button
-                                                            onClick={() => setCommentsPost(post)}
+                                                            onClick={() => setCommentsPost(it.raw)}
                                                             className="text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
                                                             title="Read, reply to, hide or delete comments as your Page"
                                                         >
-                                                            · {post.comments ?? 0} comments →
+                                                            {it.comments ?? 0} comments →
                                                         </button>
-                                                    ) : (
-                                                        post.comments !== null && <span>· {post.comments} comments</span>
                                                     )}
-                                                    {post.permalink && (
+                                                    {it.source === 'live' && it.platform !== 'facebook' && it.comments != null && (
+                                                        <span className="text-[var(--muted)]">{it.comments} comments</span>
+                                                    )}
+                                                    {it.source === 'live' && it.permalink && (
                                                         <a
-                                                            href={post.permalink}
+                                                            href={it.permalink}
                                                             target="_blank"
                                                             rel="noopener noreferrer"
                                                             className="text-[var(--accent)] hover:text-[var(--accent-hover)]"
                                                         >
                                                             View →
                                                         </a>
+                                                    )}
+                                                    {it.source === 'db' && (
+                                                        <button
+                                                            onClick={() => handleDeleteScheduledPost(it.raw)}
+                                                            title={it.status === 'scheduled' ? 'Cancel this post' : 'Remove from history'}
+                                                            className="p-1.5 rounded-lg hover:bg-red-100 text-red-500 transition-colors"
+                                                        >
+                                                            <X className="h-4 w-4" />
+                                                        </button>
                                                     )}
                                                 </div>
                                             </div>
@@ -1092,97 +1198,34 @@ const MetaDashboardView = () => {
                     </div>
                 )}
 
-                {/* LinkedIn history stays app-tracked: LinkedIn's API does not
-                    let non-partner apps read a member's post list. */}
-                {activeTab === 'history' && isConnected && publishedPosts.filter(p => p.provider === 'linkedin').length > 0 && (
-                    <div className="bg-[var(--surface)] rounded-3xl border border-[var(--border)] p-5 sm:p-6 mb-6 sm:mb-8">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)]">LinkedIn Posts</h3>
-                            <span className="text-xs text-[var(--muted)]">
-                                published via Botlance — LinkedIn does not expose full history
-                            </span>
-                        </div>
-                        <div className="space-y-3">
-                                {publishedPosts.filter(p => p.provider === 'linkedin').map(post => {
-                                    const results = post.publish_results || {};
-                                    const targets = (post.platforms && post.platforms.length) ? post.platforms : ['facebook'];
-                                    return (
-                                        <div
-                                            key={post.id}
-                                            className="flex items-start gap-4 p-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)]"
-                                        >
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm text-[var(--text)] line-clamp-2 mb-2">
-                                                    {post.content}
-                                                </p>
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    <span className="text-[11px] text-[var(--muted)]">
-                                                        {post.page_name}
-                                                    </span>
-                                                    <span className="text-[var(--muted-2)]">·</span>
-                                                    <span className="text-[11px] text-[var(--muted)]">
-                                                        {post.published_at
-                                                            ? new Date(post.published_at).toLocaleString()
-                                                            : new Date(post.scheduled_time).toLocaleString()}
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            {/* Per-network outcome */}
-                                            <div className="flex flex-col gap-1.5 shrink-0">
-                                                {targets.map(platform => {
-                                                    const r = results[platform];
-                                                    const ok = r ? r.success : true;
-                                                    const Icon = platformMeta(platform).Icon;
-                                                    return (
-                                                        <span
-                                                            key={platform}
-                                                            title={ok ? 'Published' : (r && r.error) || 'Failed'}
-                                                            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-medium ${ok
-                                                                ? 'bg-[var(--accent-muted)] text-[var(--accent)]'
-                                                                : 'bg-red-50 text-red-600'
-                                                                }`}
-                                                        >
-                                                            <Icon className="h-3 w-3" />
-                                                            {ok ? 'Published' : 'Failed'}
-                                                        </span>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                        </div>
-                    </div>
-                )}
-
-                {/* Scheduled tab with nothing queued */}
-                {activeTab === 'scheduled' && isConnected && upcomingPosts.length === 0 && (
-                    <div className="bg-[var(--surface)] rounded-3xl border border-[var(--border)] p-8 sm:p-12 text-center">
-                        <Calendar className="h-10 w-10 mx-auto mb-4 text-[var(--muted-2)]" />
-                        <h3 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)] mb-2">Nothing scheduled</h3>
-                        <p className="text-sm text-[var(--muted)] mb-6">
-                            Compose a post and pick a time and it will appear here until it publishes.
-                        </p>
-                        <button
-                            onClick={() => setShowScheduleModal(true)}
-                            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent)] text-white text-[11px] font-mono uppercase tracking-widest hover:bg-[var(--accent-hover)] transition-colors"
-                        >
-                            <Calendar className="h-4 w-4" />
-                            Schedule Post
-                        </button>
-                    </div>
-                )}
-
                 {/* Create a Post tab */}
                 {activeTab === 'create' && (
                     <CreatePostHub
                         isConnected={isConnected}
                         onConnect={() => setActiveTab('profiles')}
                         onSelect={(mode) => {
+                            if (mode === 'template') {
+                                setOccasionContext(null);
+                                setShowTemplates(true);
+                                return;
+                            }
+                            if (mode === 'bulk') {
+                                setShowBulk(true);
+                                return;
+                            }
                             setPublishMode(mode);
                             setScheduleStep(1);
                             setShowScheduleModal(true);
+                        }}
+                        onPickOccasion={(occasion) => {
+                            // Open the template gallery filtered to this occasion,
+                            // carrying its date so the post pre-schedules to it.
+                            setOccasionContext({
+                                niche: 'occasion',
+                                search: occasion.name,
+                                date: occasion.date,
+                            });
+                            setShowTemplates(true);
                         }}
                     />
                 )}
@@ -1252,6 +1295,46 @@ const MetaDashboardView = () => {
                 initialSelected={connection?.selectedPageIds || []}
                 onSave={handleSavePageSelection}
                 onClose={() => setShowPagePicker(false)}
+                saving={savingPages}
+            />
+
+            <GraphicTemplatesModal
+                isOpen={showTemplates}
+                workspaceId={activeWorkspaceId}
+                initialNiche={occasionContext?.niche || 'all'}
+                initialSearch={occasionContext?.search || ''}
+                scheduledDate={occasionContext?.date || null}
+                onClose={() => { setShowTemplates(false); setOccasionContext(null); }}
+                onUseImage={(imageUrl, opts = {}) => {
+                    // Drop the generated image into the composer as media and
+                    // open the schedule flow so the user can caption + publish.
+                    const patch = { mediaUrls: [imageUrl], mediaFiles: [] };
+                    // Occasion-driven: pre-set the schedule to the occasion date.
+                    if (opts.scheduledDate) patch.scheduledTime = `${opts.scheduledDate}T09:00`;
+                    updateScheduleForm(patch);
+                    setShowTemplates(false);
+                    setOccasionContext(null);
+                    setPublishMode('schedule');
+                    setScheduleStep(2); // jump to the content step (media already set)
+                    setShowScheduleModal(true);
+                }}
+            />
+
+            <BulkUploadModal
+                isOpen={showBulk}
+                targets={targets}
+                authHeaders={getAuthHeaders}
+                onDone={loadScheduledPosts}
+                onClose={() => setShowBulk(false)}
+            />
+
+            <AssignPagesModal
+                isOpen={showAssignPages}
+                pages={connection?.availablePages || []}
+                workspaces={workspaces}
+                currentWorkspaceId={activeWorkspaceId}
+                onAssign={handleAssignPages}
+                onClose={() => setShowAssignPages(false)}
                 saving={savingPages}
             />
 

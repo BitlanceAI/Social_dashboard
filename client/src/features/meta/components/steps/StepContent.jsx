@@ -2,6 +2,7 @@ import React from 'react';
 import { FileText, Link2 } from 'lucide-react';
 import { charLimitFor } from '@/features/meta/lib/providers';
 import MediaSelector from '@/features/meta/components/MediaSelector';
+import CaptionAssistant from '@/features/meta/components/CaptionAssistant';
 
 /**
  * Step 2: Content Creation
@@ -35,6 +36,13 @@ const StepContent = ({
                         <label className="block text-xs text-[var(--accent)] mb-2">
                             Post text
                         </label>
+                        <div className="mb-2">
+                            <CaptionAssistant
+                                platforms={platforms}
+                                hasContent={Boolean(content?.trim())}
+                                onCaption={onContentChange}
+                            />
+                        </div>
                         <textarea
                             value={content}
                             onChange={(e) => onContentChange(e.target.value)}
@@ -98,13 +106,14 @@ const StepContent = ({
                             </p>
                         </div>
 
-                        {/* Media Preview */}
+                        {/* Media Preview — show the whole image (no crop), as the
+                            network does; cap height so tall flyers stay readable. */}
                         {mediaUrls[0] && (
-                            <div className="aspect-video bg-[var(--surface)] border-y border-[var(--border)] overflow-hidden">
+                            <div className="bg-[var(--surface)] border-y border-[var(--border)] flex justify-center">
                                 <img
                                     src={mediaUrls[0]}
                                     alt="Preview"
-                                    className="w-full h-full object-cover"
+                                    className="w-full max-h-[460px] object-contain"
                                 />
                             </div>
                         )}

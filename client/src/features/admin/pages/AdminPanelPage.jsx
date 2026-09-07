@@ -7,6 +7,9 @@ import OverviewPanel from '../components/OverviewPanel';
 import UsersPanel from '../components/UsersPanel';
 import ConnectionsPanel from '../components/ConnectionsPanel';
 import StoragePanel from '../components/StoragePanel';
+import PlansPanel from '../components/PlansPanel';
+import OccasionsPanel from '../components/OccasionsPanel';
+import TemplatesPanel from '../components/TemplatesPanel';
 import PostsPanel from '../components/PostsPanel';
 import PushTokensPanel from '../components/PushTokensPanel';
 import HealthPanel from '../components/HealthPanel';
@@ -16,6 +19,9 @@ const TITLES = {
     overview: ['Overview', 'Everything running across the platform right now'],
     users: ['Users', 'Every account on the platform'],
     connections: ['Connections', 'Every linked Meta and LinkedIn account, with token health'],
+    occasions: ['Occasions', 'The Indian occasion calendar — verify movable dates, override or add occasions'],
+    templates: ['Templates', 'Graphic templates for Create-a-Post — prompts, fields, and niches'],
+    plans: ['Plans', 'Subscription tiers, pricing, and subscriptions'],
     storage: ['Storage', 'Media storage pricing, retention, and purchases'],
     posts: ['Scheduled Posts', 'The publishing queue across every user and workspace'],
     push: ['Push Tokens', 'Devices registered for web push notifications'],
@@ -114,6 +120,9 @@ const AdminPanelPage = () => {
                 )}
                 {tab === 'users' && <UsersPanel />}
                 {tab === 'connections' && <ConnectionsPanel />}
+                {tab === 'occasions' && <OccasionsPanel />}
+                {tab === 'templates' && <TemplatesPanel />}
+                {tab === 'plans' && <PlansPanel />}
                 {tab === 'storage' && <StoragePanel />}
                 {tab === 'posts' && <PostsPanel />}
                 {tab === 'push' && <PushTokensPanel />}

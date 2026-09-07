@@ -19,6 +19,7 @@ import LinkedInService from '../linkedin/linkedin.service.js';
 import { decryptData } from '../../shared/utils/encryption.js';
 import { sendToWorkspace } from '../push/push.service.js';
 import { sweepExpiredStorage } from '../storage/storage.service.js';
+import { sweepExpiredDesigns } from '../design/design.service.js';
 
 let supabase;
 
@@ -141,6 +142,8 @@ export const startPostScheduler = () => {
             sweepExpiringLinkedInTokens();
             // Purges libraries whose paid storage lapsed past the grace window.
             sweepExpiredStorage();
+            // Deletes generated flyer images older than the retention window.
+            sweepExpiredDesigns();
         }
     };
 

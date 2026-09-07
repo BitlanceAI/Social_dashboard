@@ -109,13 +109,13 @@ const StepReview = ({ formData, pages }) => {
                         </p>
                     </div>
 
-                    {/* Media */}
+                    {/* Media — full image, no crop (matches how the network renders it) */}
                     {hasMedia && (
-                        <div className="aspect-video bg-[var(--surface)] border-y border-[var(--border)] overflow-hidden shrink-0">
+                        <div className="bg-[var(--surface)] border-y border-[var(--border)] flex justify-center shrink-0">
                             <img
                                 src={formData.mediaUrls[0]}
                                 alt="Post media"
-                                className="w-full h-full object-cover"
+                                className="w-full max-h-[460px] object-contain"
                             />
                         </div>
                     )}

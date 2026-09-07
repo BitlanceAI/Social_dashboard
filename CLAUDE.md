@@ -119,13 +119,20 @@ LINKEDIN_RETURN_PATH=
 LINKEDIN_ORG_SCOPES_ENABLED=false  # flipping this invalidates ALL LinkedIn tokens
 FRONTEND_URL=
 ENCRYPTION_KEY=
-RAZORPAY_KEY_ID=              # storage billing; buy button disabled without both
+RAZORPAY_KEY_ID=              # storage billing + subscriptions; disabled without both
 RAZORPAY_KEY_SECRET=
+RAZORPAY_WEBHOOK_SECRET=      # subscription webhook signature check (set in Razorpay dashboard)
 BUNNY_STORAGE_ZONE=           # media library backend; zone+key+pull-zone set = Bunny,
 BUNNY_API_KEY=                #   any missing = falls back to Supabase Storage.
 BUNNY_PULL_ZONE_URL=          # e.g. https://bitlance.b-cdn.net (protocol optional)
 BUNNY_REGION=                 # storage region prefix (sg, ny, …); empty/de = default
 BUNNY_ACCOUNT_API_KEY=        # optional; enables CDN cache purge on delete (Account → API key, ≠ zone password)
+OPENAI_API_KEY=               # design image generation (modules/design/generation.service.js)
+OPENAI_IMAGE_MODEL=           # optional; defaults to gpt-image-2
+DESIGN_GENERATE_URL=          # optional external renderer override; when set it wins over OpenAI
+DESIGN_RETENTION_DAYS=        # optional; generated flyer images purged after N days (default 30)
+PERPLEXITY_API_KEY=           # AI caption writing (modules/ai); feature hides itself when unset
+PERPLEXITY_MODEL=             # optional; defaults to 'sonar'
 PORT=3001
 ALLOWED_ORIGINS=              # Comma-separated, overrides hardcoded list
 INSECURE_TLS=true             # Dev only — disable in production
@@ -146,11 +153,30 @@ VITE_FIREBASE_*=              # optional; web push opt-in hides itself without t
 `users`, `meta_connections`, `linkedin_connections`, `scheduled_posts`, `push_tokens`,
 `storage_settings` (single row: price/GB/month in paise + delete-after-expiry days, admin-set),
 `storage_purchases` (Razorpay order lifecycle; amounts in minor units; entitlement = paid rows with future `expires_at`),
+`subscription_plans` (admin-editable tier catalog: prices in paise, per-plan limits, Razorpay plan ids; public-readable),
+`subscriptions` (one per user/owner: plan_key, interval, status trialing→active, 14-day trial via `ensureSubscription`; account cap counted across the user's workspaces — "per account, not per seat"),
+`occasion_dates` (one row per (slug, year) for the Indian occasion calendar; `source='rule'` rows are seeded from
+the computable FIXED/NTH_WEEKDAY tables in `shared/utils/occasionDates.js` by `server/scripts/seed-occasion-dates.mjs`,
+`source='admin'` rows are human-entered and win over both the seed and the static rule. Movable festivals
+(Diwali, Eid, Holi …) have NO date until an admin enters a verified one in the admin Occasions tab — the
+resolver returns null so callers ask rather than guess),
 `media_library` (reusable files, isolated per workspace via `workspace_id` + the `x-workspace-id` header; keys `library/{workspace}/{user}/…` — Bunny Storage when the BUNNY_* env vars are set, else the `post-media` bucket; each row's `url` records where its object lives, so deletes route correctly across a backend switch; `size_bytes` sum vs purchased GB is the per-user quota check across all workspaces)
 
 `scheduled_posts.provider` (`'meta' | 'linkedin'`) picks the publisher, and a
 CHECK constraint enforces that exactly the matching connection FK is set. The
 browser has `FOR ALL` RLS on that table, so the constraint is a real guard.
+
+**Scheduling has two paths, by status.** A **Facebook-only** post scheduled
+10 min–75 days out is handed to Meta directly (`scheduled_publish_time` in
+`MetaService.schedulePost`); Meta holds and publishes it, and the row is stored
+`status='scheduled'` with `meta_post_id` set. **The server scheduler only ever
+processes `status='pending'`, so a `scheduled` row is never double-published.**
+Cancelling a `scheduled` row deletes it on Meta first (`DELETE /{meta_post_id}`)
+then drops the row. Everything else — Instagram (no scheduling API at all),
+mixed FB+IG, or times inside 10 minutes — stays `pending` and publishes from our
+scheduler. `GET /posts/scheduled` lazily flips a past-due `scheduled` row to
+`published` (Meta gives no callback). Native path lives in the `/posts/schedule`
+route + `20260906140000_scheduled_posts_native.sql` (adds the `scheduled` status).
 
 Migrations live in the repo-root `supabase/migrations/` (single CLI project).
 
@@ -167,6 +193,9 @@ Migrations live in the repo-root `supabase/migrations/` (single CLI project).
 | `/api/push` | `modules/push` | FCM web-push token registration |
 | `/api/admin` | `modules/admin` | Platform admin (users.role='admin' only): stats, users, connections, storage settings |
 | `/api/storage` | `modules/storage` | Paid media storage: Razorpay orders + verification, entitlement |
+| `/api/occasions` | `modules/occasions` | Read-only occasion calendar; admin writes at `/api/admin/occasions` |
+| `/api/ai` | `modules/ai` | AI post captions via Perplexity (`/caption`, `/status`); disabled without `PERPLEXITY_API_KEY` |
+| `/api/billing` | `modules/billing` | Subscription plans (public `/plans`), Razorpay Subscriptions, entitlement, webhook |
 | `/health` | `app.js` | Liveness probe |
 
 All mounted in `server/src/app.js`.
