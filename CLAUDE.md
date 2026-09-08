@@ -136,6 +136,13 @@ DESIGN_GENERATE_URL=          # optional external renderer override; when set it
 DESIGN_RETENTION_DAYS=        # optional; generated flyer images purged after N days (default 30)
 PERPLEXITY_API_KEY=           # AI caption writing (modules/ai); feature hides itself when unset
 PERPLEXITY_MODEL=             # optional; defaults to 'sonar'
+WHATSAPP_GLOBAL_TOKEN=        # WhatsApp Cloud API system-user token (post approvals). Token + phone id
+WHATSAPP_PHONE_ID=            #   both set = approval field shows in the scheduler; either missing = hidden
+WHATSAPP_VERIFY_TOKEN=        # webhook handshake secret; falls back to META_VERIFY_TOKEN
+WHATSAPP_PLACEHOLDER_IMAGE_URL=  # header image for text-only posts (the template REQUIRES a media header)
+WHATSAPP_APPROVAL_TEMPLATE=   # optional; defaults to post_approval_utility (image header)
+WHATSAPP_APPROVAL_VIDEO_TEMPLATE=  # optional; defaults to post_approval_utility_video (video header)
+WHATSAPP_TEMPLATE_LANG=       # optional; defaults to 'en'
 PORT=3001
 ALLOWED_ORIGINS=              # Comma-separated, overrides hardcoded list
 INSECURE_TLS=true             # Dev only — disable in production
@@ -181,6 +188,21 @@ scheduler. `GET /posts/scheduled` lazily flips a past-due `scheduled` row to
 `published` (Meta gives no callback). Native path lives in the `/posts/schedule`
 route + `20260906140000_scheduled_posts_native.sql` (adds the `scheduled` status).
 
+**WhatsApp approval is a third, opt-in path.** When `/posts/schedule` (Meta or
+LinkedIn) receives `approverPhones`, the row is inserted as
+`status='pending_approval'` and `modules/approvals/approval.service.js` sends
+every approver the `post_approval_utility` template (Approve / Reject
+quick-replies whose payloads are `SCHED_APPROVE_<id>` / `SCHED_REJECT_<id>`)
+plus a second message with the full caption. `POST /api/whatsapp/webhook`
+receives the taps: Approve calls `activateApprovedPost`, which re-evaluates the
+native Meta path (FB-only, 10 min–75 days → `scheduled`) and otherwise sets
+`pending` for our scheduler; Reject sets `cancelled` and asks for a reason
+(stored in `rejection_comment`). A plain-text reply quoting either message
+edits `content` before the decision. First decision wins (atomic on status),
+other approvers are told. The scheduler tick also runs `sendApprovalReminders`
+(max 3, at 1h/30m/10m gaps). `approval_settings` remembers approver numbers per
+workspace. Migration: `20260908120000_scheduled_posts_approval.sql`.
+
 Migrations live in the repo-root `supabase/migrations/` (single CLI project).
 
 ---
@@ -199,6 +221,8 @@ Migrations live in the repo-root `supabase/migrations/` (single CLI project).
 | `/api/occasions` | `modules/occasions` | Read-only occasion calendar; admin writes at `/api/admin/occasions` |
 | `/api/ai` | `modules/ai` | AI post captions via Perplexity (`/caption`, `/status`); disabled without `PERPLEXITY_API_KEY` |
 | `/api/billing` | `modules/billing` | Subscription plans (public `/plans`), Razorpay Subscriptions, entitlement, webhook |
+| `/api/whatsapp` | `modules/whatsapp` | WhatsApp Cloud API: public `/webhook` (GET handshake + POST button taps/text, HMAC-verified), `/status` |
+| `/api/approvals` | `modules/approvals` | Post approval: saved `/approvers` per workspace, `/:id/approve`, `/:id/reject`, `/:id/resend` |
 | `/health` | `app.js` | Liveness probe |
 
 All mounted in `server/src/app.js`.

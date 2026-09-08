@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, Eye, Calendar, Users, Image, FileText } from 'lucide-react';
+import { CheckCircle2, Eye, Calendar, Users, Image, FileText, MessageCircle } from 'lucide-react';
 
 /**
  * Step 5: Review & Confirm
@@ -11,6 +11,12 @@ const StepReview = ({ formData, pages }) => {
     const scheduledDate = formData.scheduledTime
         ? new Date(formData.scheduledTime)
         : null;
+    // Same normalization the server applies: digits only, 10 digits → +91.
+    const approvers = [...new Set(String(formData.approverPhones || '')
+        .split(/[,;\s]+/)
+        .map((p) => p.replace(/\D/g, ''))
+        .filter(Boolean)
+        .map((d) => (d.length === 10 ? `91${d}` : d)))];
 
     return (
         <div className="space-y-8">
@@ -78,6 +84,26 @@ const StepReview = ({ formData, pages }) => {
                             </div>
                         </div>
                     </div>
+
+                    {/* WhatsApp approval — only when approver numbers were entered */}
+                    {approvers.length > 0 && (
+                        <div className="p-5 bg-[var(--bg)] border border-[var(--border)] flex flex-col">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 border border-[var(--border)] bg-[var(--surface)]">
+                                    <MessageCircle className="h-5 w-5 text-[var(--accent)]" />
+                                </div>
+                                <div className="overflow-hidden">
+                                    <p className="text-xs text-[var(--muted)] mb-1">WhatsApp approval</p>
+                                    <p className="font-bold text-[var(--text)] tracking-tight mt-1 truncate">
+                                        {approvers.map((p) => `+${p}`).join(', ')}
+                                    </p>
+                                    <p className="text-[11px] text-[var(--muted)] mt-1">
+                                        Held until one of them taps Approve.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                 </div>
 

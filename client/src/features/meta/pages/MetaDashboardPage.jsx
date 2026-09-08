@@ -45,7 +45,9 @@ import {
     CalendarClock,
     Users,
     UploadCloud,
-    Trash2
+    Trash2,
+    MessageCircle,
+    Check
 } from 'lucide-react';
 
 import {
@@ -124,7 +126,12 @@ const MetaDashboardView = () => {
         hashtags: '',
         scheduledTime: '',
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        approverPhones: '', // comma-separated WhatsApp numbers; empty = no approval step
     });
+
+    // WhatsApp approval channel: whether the server has it configured, and the
+    // approver numbers this workspace used before. Loaded when the composer opens.
+    const [approvalConfig, setApprovalConfig] = useState({ enabled: false, savedPhones: [] });
 
     // Helper to update form
     const updateScheduleForm = (updates) => setScheduleFormData(prev => ({ ...prev, ...updates }));
@@ -445,6 +452,73 @@ const MetaDashboardView = () => {
         }
     };
 
+    // ── WhatsApp approval ────────────────────────────────────────────────────
+
+    const loadApprovalConfig = async () => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/approvals/approvers`, {
+                headers: getAuthHeaders()
+            });
+            const data = await response.json().catch(() => ({}));
+            if (response.ok && data.success) {
+                setApprovalConfig({ enabled: Boolean(data.enabled), savedPhones: data.phones || [] });
+            }
+        } catch (error) {
+            // Optional feature: a failed probe just hides the approval field.
+            console.error('Failed to load approval settings:', error);
+        }
+    };
+
+    useEffect(() => {
+        if (showScheduleModal && (session?.access_token || authTokenRef.current)) loadApprovalConfig();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showScheduleModal]);
+
+    const [approvalBusyId, setApprovalBusyId] = useState(null);
+
+    const handleApprovePost = async (post) => {
+        if (!confirm('Approve this post from the dashboard? It will publish at its scheduled time.')) return;
+        setApprovalBusyId(post.id);
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/approvals/${post.id}/approve`, {
+                method: 'POST',
+                headers: getAuthHeaders()
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                toast.error(data.error || 'Failed to approve post');
+            } else {
+                toast.success(data.message || 'Post approved');
+            }
+            await loadScheduledPosts();
+        } catch {
+            toast.error('Failed to approve post');
+        } finally {
+            setApprovalBusyId(null);
+        }
+    };
+
+    const handleResendApproval = async (post) => {
+        setApprovalBusyId(post.id);
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/approvals/${post.id}/resend`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({})
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                toast.error(data.error || 'Failed to resend WhatsApp request');
+            } else {
+                toast.success(data.message || 'Approval request resent');
+            }
+        } catch {
+            toast.error('Failed to resend WhatsApp request');
+        } finally {
+            setApprovalBusyId(null);
+        }
+    };
+
 
 
 
@@ -604,7 +678,7 @@ const MetaDashboardView = () => {
             // Rows for the other provider are still valid, so re-read the queue
             // rather than clearing it outright.
             await loadScheduledPosts();
-        } catch (error) {
+        } catch {
             toast.error('Failed to disconnect');
         }
     };
@@ -624,7 +698,7 @@ const MetaDashboardView = () => {
             ].filter(Boolean));
             await loadAllConnections();
             toast.success('Data refreshed');
-        } catch (error) {
+        } catch {
             toast.error('Refresh failed');
         } finally {
             setRefreshing(false);
@@ -722,6 +796,11 @@ const MetaDashboardView = () => {
                     else toast.success('Published!');
                     // Show the result rather than leaving them on the composer tab
                     setActiveTab('history');
+                } else if (data.approval) {
+                    // Held for WhatsApp approval — say whether the request went out.
+                    if (data.approval.sent) toast.success(data.message, { duration: 8000 });
+                    else toast(data.message, { icon: '⚠️', duration: 12000 });
+                    setActiveTab('history');
                 } else {
                     toast.success('Post scheduled successfully!');
                     // The server flags a LinkedIn post scheduled past the
@@ -740,6 +819,7 @@ const MetaDashboardView = () => {
                     hashtags: '',
                     scheduledTime: '',
                     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    approverPhones: '',
                 });
                 await loadScheduledPosts();
             } else {
@@ -835,6 +915,7 @@ const MetaDashboardView = () => {
             SCHEDULED: { icon: Clock, color: 'text-[var(--accent)]', bg: 'bg-[var(--accent-muted)]', label: 'Scheduled' },
             pending: { icon: Clock, color: 'text-[var(--accent)]', bg: 'bg-[var(--accent-muted)]', label: 'Pending' },
             scheduled: { icon: Clock, color: 'text-[var(--accent)]', bg: 'bg-[var(--accent-muted)]', label: 'Scheduled on Meta' },
+            awaiting_approval: { icon: MessageCircle, color: 'text-purple-500', bg: 'bg-purple-500/10', label: 'Awaiting WhatsApp approval' },
             published: { icon: CheckCircle2, color: 'text-[var(--accent)]', bg: 'bg-[var(--accent-muted)]', label: 'Published' },
             failed: { icon: AlertCircle, color: 'text-red-500', bg: 'bg-red-500/10', label: 'Failed' }
         };
@@ -928,6 +1009,7 @@ const MetaDashboardView = () => {
             : ((p.platforms && p.platforms.length) ? p.platforms : ['facebook']);
         let status;
         if (p.status === 'failed') status = 'failed';
+        else if (p.status === 'pending_approval') status = 'awaiting_approval';
         else if (['pending', 'processing', 'scheduled'].includes(p.status)) status = 'scheduled';
         else if (p.status === 'published') status = 'published';
         else return []; // cancelled etc. never surface
@@ -1057,6 +1139,7 @@ const MetaDashboardView = () => {
                                     <option value="all">All</option>
                                     <option value="published">Published</option>
                                     <option value="scheduled">Scheduled</option>
+                                    <option value="awaiting_approval">Awaiting approval</option>
                                     <option value="failed">Failed</option>
                                 </select>
                             </label>
@@ -1157,6 +1240,15 @@ const MetaDashboardView = () => {
                                                 <p className="text-[11px] text-red-500 line-clamp-2">{it.error}</p>
                                             )}
 
+                                            {it.status === 'awaiting_approval' && (
+                                                <p className="text-[11px] text-[var(--muted)]">
+                                                    Sent to {(it.raw.approver_phones || []).map((p) => `+${p}`).join(', ') || 'no approver'}
+                                                    {it.raw.approval_sent_at
+                                                        ? ` · ${new Date(it.raw.approval_sent_at).toLocaleString()}`
+                                                        : ' · WhatsApp request not delivered yet'}
+                                                </p>
+                                            )}
+
                                             <div className="flex items-center justify-between gap-2 mt-auto">
                                                 <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium ${statusConfig.bg} ${statusConfig.color}`}>
                                                     {statusConfig.label}
@@ -1186,6 +1278,26 @@ const MetaDashboardView = () => {
                                                         >
                                                             View →
                                                         </a>
+                                                    )}
+                                                    {it.source === 'db' && it.status === 'awaiting_approval' && (
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleResendApproval(it.raw)}
+                                                                disabled={approvalBusyId === it.raw.id}
+                                                                title="Send the WhatsApp approval request again"
+                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-[var(--border)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent)] disabled:opacity-50 transition-colors"
+                                                            >
+                                                                <MessageCircle className="h-3.5 w-3.5" /> Resend
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleApprovePost(it.raw)}
+                                                                disabled={approvalBusyId === it.raw.id}
+                                                                title="Approve from the dashboard without waiting for WhatsApp"
+                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] disabled:opacity-50 transition-colors"
+                                                            >
+                                                                <Check className="h-3.5 w-3.5" /> Approve
+                                                            </button>
+                                                        </>
                                                     )}
                                                     {it.source === 'db' && (
                                                         <button
@@ -1395,6 +1507,10 @@ const MetaDashboardView = () => {
                     <StepSchedule
                         scheduledTime={scheduleFormData.scheduledTime}
                         onScheduleChange={(scheduledTime) => updateScheduleForm({ scheduledTime })}
+                        approvalEnabled={approvalConfig.enabled}
+                        savedApprovers={approvalConfig.savedPhones}
+                        approverPhones={scheduleFormData.approverPhones}
+                        onApproverChange={(approverPhones) => updateScheduleForm({ approverPhones })}
                     />
                 )}
 

@@ -735,7 +735,19 @@ class MetaService {
      * Generate OAuth authorization URL
      */
     static getOAuthUrl(appId, redirectUri, scope, state) {
-        const scopes = scope || MetaService.DEFAULT_SCOPES;
+        // META_EXTRA_SCOPES appends permissions for TESTING without editing
+        // DEFAULT_SCOPES. Meta grants an unapproved permission to anyone with a
+        // role on the app, so an app admin can verify whether a scope fixes a
+        // problem before committing to App Review. Requesting one for a normal
+        // user fails the whole dialog with "Invalid Scopes", so anything proven
+        // useful here belongs in DEFAULT_SCOPES *after* it is approved.
+        // Ignored when a login configuration is used: a config carries its own
+        // permission list and `scope` is not sent alongside it.
+        const extra = (process.env.META_EXTRA_SCOPES || '')
+            .split(',')
+            .map((v) => v.trim())
+            .filter(Boolean);
+        const scopes = [...new Set([...(scope || MetaService.DEFAULT_SCOPES), ...extra])];
 
         // Facebook Login for Business. Classic login shows the Page/Instagram
         // asset picker only on the FIRST authorization; afterwards "Continue

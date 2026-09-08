@@ -20,6 +20,7 @@ import { decryptData } from '../../shared/utils/encryption.js';
 import { sendToWorkspace } from '../push/push.service.js';
 import { sweepExpiredStorage } from '../storage/storage.service.js';
 import { sweepExpiredDesigns } from '../design/design.service.js';
+import { sendApprovalReminders } from '../approvals/approval.service.js';
 
 let supabase;
 
@@ -136,6 +137,12 @@ export const startPostScheduler = () => {
         }
 
         await checkAndPublishPosts();
+
+        // Nudges approvers who have not tapped Approve/Reject yet (no-op
+        // without WhatsApp credentials). Cheap: a single indexed query.
+        await sendApprovalReminders().catch((err) => {
+            console.error('[Scheduler] Approval reminder sweep error:', err.message);
+        });
 
         // Piggybacks on the same reachability guard as the publish pass.
         if (tickCount++ % EXPIRY_SWEEP_EVERY_TICKS === 0) {

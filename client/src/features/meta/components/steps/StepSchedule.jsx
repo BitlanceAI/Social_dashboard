@@ -1,5 +1,5 @@
 import React from 'react';
-import { CalendarClock, AlertCircle } from 'lucide-react';
+import { CalendarClock, AlertCircle, MessageCircle } from 'lucide-react';
 
 /**
  * Step 3: Schedule
@@ -16,7 +16,30 @@ const toLocalInputValue = (date) => {
         + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
-const StepSchedule = ({ scheduledTime, onScheduleChange }) => {
+/** Digits only; 10-digit Indian numbers get the 91 prefix (mirrors the server). */
+const normalizePhone = (p) => {
+    const digits = String(p || '').replace(/\D/g, '');
+    if (!digits) return null;
+    return digits.length === 10 ? `91${digits}` : digits;
+};
+const parsePhones = (text) => [...new Set(String(text || '').split(/[,;\s]+/).map(normalizePhone).filter(Boolean))];
+
+const StepSchedule = ({
+    scheduledTime,
+    onScheduleChange,
+    approvalEnabled = false,
+    savedApprovers = [],
+    approverPhones = '',
+    onApproverChange = () => {},
+}) => {
+    const chosenApprovers = parsePhones(approverPhones);
+    const toggleSaved = (phone) => {
+        const next = chosenApprovers.includes(phone)
+            ? chosenApprovers.filter((p) => p !== phone)
+            : [...chosenApprovers, phone];
+        onApproverChange(next.join(', '));
+    };
+
     // Two minutes of headroom, in local time — using toISOString() here would
     // produce a UTC string and let the user pick times already in the past.
     const min = new Date();
@@ -97,6 +120,63 @@ const StepSchedule = ({ scheduledTime, onScheduleChange }) => {
                     ))}
                 </div>
             </div>
+
+            {/* WhatsApp approval (optional) — only shown when the server has the channel configured */}
+            {approvalEnabled && (
+                <div className="max-w-md rounded-2xl bg-[var(--bg)] border border-[var(--border)] p-6">
+                    <label htmlFor="approver-phones" className="flex items-center gap-2 text-sm font-medium text-[var(--text)] mb-1">
+                        <MessageCircle className="h-4 w-4 text-[var(--accent)]" />
+                        WhatsApp approval <span className="text-xs font-normal text-[var(--muted)]">(optional)</span>
+                    </label>
+                    <p className="text-xs text-[var(--muted)] mb-3 leading-relaxed">
+                        Each number gets the post on WhatsApp with Approve / Reject buttons. The post
+                        is held until someone approves; the first decision wins.
+                    </p>
+                    <input
+                        id="approver-phones"
+                        type="text"
+                        inputMode="tel"
+                        value={approverPhones || ''}
+                        onChange={(e) => onApproverChange(e.target.value)}
+                        placeholder="e.g. 9876543210, 919123456789"
+                        className="w-full px-4 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] focus:border-[var(--accent)] focus:ring-0 focus:outline-none transition-colors text-sm"
+                    />
+                    <p className="text-[11px] text-[var(--muted)] mt-2">
+                        Separate several numbers with commas. 10-digit numbers are treated as Indian (+91).
+                    </p>
+
+                    {savedApprovers.length > 0 && (
+                        <div className="mt-4">
+                            <p className="text-xs font-medium text-[var(--text)] mb-2">Previously used</p>
+                            <div className="flex flex-wrap gap-2">
+                                {savedApprovers.map((phone) => {
+                                    const active = chosenApprovers.includes(phone);
+                                    return (
+                                        <button
+                                            key={phone}
+                                            type="button"
+                                            onClick={() => toggleSaved(phone)}
+                                            className={`px-3 py-1.5 rounded-full border text-xs transition-colors ${active
+                                                ? 'border-[var(--accent)] bg-[var(--accent-muted)] text-[var(--accent)]'
+                                                : 'border-[var(--border)] bg-[var(--surface)] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]'}`}
+                                        >
+                                            +{phone}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {chosenApprovers.length > 0 && (
+                        <p className="text-sm text-[var(--text)] mt-4">
+                            Will ask{' '}
+                            <span className="font-medium">{chosenApprovers.map((p) => `+${p}`).join(', ')}</span>
+                            {' '}before publishing.
+                        </p>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
