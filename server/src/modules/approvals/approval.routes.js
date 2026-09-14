@@ -20,12 +20,15 @@ import { resolveWorkspace } from '../../middleware/workspace.js';
 import { cleanPhones, isWhatsAppEnabled, sendTextMessage, rowApproverPhones } from '../whatsapp/whatsapp.service.js';
 import {
     getSavedApprovers,
+    getDefaultApprovers,
     setSavedApprovers,
     rememberApprovers,
     requestApproval,
     activateApprovedPost,
     rejectPendingPost,
 } from './approval.service.js';
+
+import { loadApprovalQueue, parseQueuePage } from './approval.store.js';
 
 const router = express.Router();
 
@@ -51,9 +54,23 @@ const loadPendingPost = async (req, res) => {
     return post;
 };
 
+router.get('/pending', async (req, res) => {
+    const pendingPage = parseQueuePage(req.query.pendingPage);
+    const approvedPage = parseQueuePage(req.query.approvedPage);
+    if (pendingPage === null || approvedPage === null) {
+        return res.status(400).json({ error: 'Pages must be positive integers (maximum 100000).' });
+    }
+    try {
+        res.json(await loadApprovalQueue(supabaseAdmin, req.workspaceId, pendingPage, approvedPage));
+    } catch (err) {
+        console.error('Load approval queue error:', err);
+        res.status(500).json({ error: 'Could not load approval queue.' });
+    }
+});
+
 router.get('/approvers', async (req, res) => {
     try {
-        res.json({ success: true, enabled: isWhatsAppEnabled(), phones: await getSavedApprovers(req.workspaceId) });
+        res.json({ success: true, enabled: isWhatsAppEnabled(), phones: await getSavedApprovers(req.workspaceId), defaultPhones: await getDefaultApprovers(req.workspaceId) });
     } catch (err) {
         console.error('Get approvers error:', err);
         res.status(500).json({ error: err.message });
@@ -62,8 +79,18 @@ router.get('/approvers', async (req, res) => {
 
 router.put('/approvers', async (req, res) => {
     try {
-        const phones = await setSavedApprovers(req.workspaceId, req.body?.phones ?? req.body?.approverPhones ?? []);
-        res.json({ success: true, phones });
+        if (req.body?.defaultPhones !== undefined) {
+            const input = req.body.defaultPhones;
+            if (typeof input !== 'string' && !Array.isArray(input)) {
+                return res.status(400).json({ error: 'Approval numbers must be a comma-separated list.' });
+            }
+            const parts = (Array.isArray(input) ? input : input.split(/[,;\s]+/)).filter(Boolean);
+            if (parts.some(phone => !cleanPhones([phone]).length)) {
+                return res.status(400).json({ error: 'Enter valid WhatsApp numbers with country codes, or 10-digit Indian numbers.' });
+            }
+        }
+        const phones = await setSavedApprovers(req.workspaceId, req.body?.phones ?? req.body?.approverPhones ?? [], req.body?.defaultPhones);
+        res.json({ success: true, phones, defaultPhones: await getDefaultApprovers(req.workspaceId) });
     } catch (err) {
         console.error('Set approvers error:', err);
         res.status(500).json({ error: err.message });
@@ -87,8 +114,8 @@ router.post('/:id/approve', async (req, res) => {
         res.json({
             success: true,
             post: updated,
-            message: updated.status === 'scheduled'
-                ? 'Approved and handed to Facebook for publishing.'
+            message: new Date(updated.scheduled_time).getTime() <= Date.now()
+                ? 'Approved. It will publish on the next scheduler run.'
                 : 'Approved. It will publish at the scheduled time.',
         });
     } catch (err) {
@@ -102,15 +129,10 @@ router.post('/:id/reject', async (req, res) => {
         const post = await loadPendingPost(req, res);
         if (!post) return;
 
-        const updated = await rejectPendingPost(post, { by: `dashboard:${req.user.id}` });
+        const updated = await rejectPendingPost(post, { by: `dashboard:${req.user.id}`, reason: req.body?.reason || '' });
         if (!updated) {
             return res.status(409).json({ error: 'This post was just settled by someone else. Reload to see its state.' });
         }
-        const reason = String(req.body?.reason || '').trim();
-        if (reason) {
-            await supabaseAdmin.from('scheduled_posts').update({ rejection_comment: reason }).eq('id', post.id);
-        }
-
         for (const phone of rowApproverPhones(post)) {
             await sendTextMessage(phone, '❌ The scheduled post was rejected from the dashboard — no action needed.').catch(() => {});
         }

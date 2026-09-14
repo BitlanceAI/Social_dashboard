@@ -1,3 +1,5 @@
+import ApprovalQueuePanel from '@/features/meta/components/ApprovalQueuePanel';
+import useApprovalQueue from '@/features/meta/hooks/useApprovalQueue';
 import React, { useState, useEffect, useRef } from 'react';
 import { Facebook } from 'lucide-react';
 import { platformMeta, providerOf, prefixFor, charLimitFor } from '@/features/meta/lib/providers';
@@ -71,17 +73,17 @@ import BulkUploadModal from '@/features/meta/components/BulkUploadModal';
 // effect or auth-state handler re-fires it — kills the duplicate connect toast.
 const processedOAuthTokens = new Set();
 
-const MetaDashboardView = () => {
+const MetaDashboardView = ({ activeTab, setActiveTab }) => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const { user } = useAuth();
     const { activeWorkspaceId, workspaces } = useWorkspace();
 
     // Session state (fetched from Supabase)
-    const [activeTab, setActiveTab] = useState('create');
     // 'schedule' queues for later, 'now' publishes immediately
     const [publishMode, setPublishMode] = useState('schedule');
     const [session, setSession] = useState(null);
+    const approvalQueue = useApprovalQueue(session?.access_token, activeWorkspaceId, activeTab === 'approvals');
 
     // Connection state. Each provider connects independently, so the
     // dashboard is usable with either one on its own.
@@ -131,7 +133,10 @@ const MetaDashboardView = () => {
 
     // WhatsApp approval channel: whether the server has it configured, and the
     // approver numbers this workspace used before. Loaded when the composer opens.
-    const [approvalConfig, setApprovalConfig] = useState({ enabled: false, savedPhones: [] });
+    const [approvalConfig, setApprovalConfig] = useState({ enabled: false, savedPhones: [], defaultPhones: [] });
+    const approverEditVersion = useRef(0);
+    const [savingApprovers, setSavingApprovers] = useState(false);
+    const [reuseApprovers, setReuseApprovers] = useState(true);
 
     // Helper to update form
     const updateScheduleForm = (updates) => setScheduleFormData(prev => ({ ...prev, ...updates }));
@@ -455,13 +460,16 @@ const MetaDashboardView = () => {
     // ── WhatsApp approval ────────────────────────────────────────────────────
 
     const loadApprovalConfig = async () => {
+        const editVersion = approverEditVersion.current;
         try {
             const response = await fetch(`${API_BASE_URL}/api/approvals/approvers`, {
                 headers: getAuthHeaders()
             });
             const data = await response.json().catch(() => ({}));
             if (response.ok && data.success) {
-                setApprovalConfig({ enabled: Boolean(data.enabled), savedPhones: data.phones || [] });
+                setApprovalConfig({ enabled: Boolean(data.enabled), savedPhones: data.phones || [], defaultPhones: data.defaultPhones || [] });
+                setReuseApprovers(true);
+                setScheduleFormData(current => current.approverPhones || editVersion !== approverEditVersion.current ? current : { ...current, approverPhones: (data.defaultPhones || []).join(', ') });
             }
         } catch (error) {
             // Optional feature: a failed probe just hides the approval field.
@@ -474,10 +482,29 @@ const MetaDashboardView = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showScheduleModal]);
 
+    const saveApprovalNumbers = async () => {
+        setSavingApprovers(true);
+        try {
+            const input = scheduleFormData.approverPhones.trim();
+            const response = await fetch(`${API_BASE_URL}/api/approvals/approvers`, {
+                method: 'PUT', headers: getAuthHeaders(),
+                body: JSON.stringify({ phones: [...approvalConfig.savedPhones, ...input.split(/[,;\s]+/).filter(Boolean)], defaultPhones: reuseApprovers ? input : [] }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Could not save approval numbers');
+            setApprovalConfig(current => ({ ...current, savedPhones: data.phones || [], defaultPhones: data.defaultPhones || [] }));
+            toast.success(reuseApprovers && data.defaultPhones?.length ? 'Approval numbers saved. They will be filled in next time.' : 'Automatic approval numbers cleared.');
+        } catch (err) { toast.error(err.message); }
+        finally { setSavingApprovers(false); }
+    };
+
     const [approvalBusyId, setApprovalBusyId] = useState(null);
 
     const handleApprovePost = async (post) => {
-        if (!confirm('Approve this post from the dashboard? It will publish at its scheduled time.')) return;
+        const timing = new Date(post.scheduled_time).getTime() <= Date.now()
+            ? 'Its scheduled time has passed. It will publish on the next scheduler run.'
+            : 'It will publish at its scheduled time, or on the next scheduler run if that time passes before approval.';
+        if (!confirm(`Approve this post from the dashboard? ${timing}`)) return;
         setApprovalBusyId(post.id);
         try {
             const response = await fetch(`${API_BASE_URL}/api/approvals/${post.id}/approve`, {
@@ -800,7 +827,7 @@ const MetaDashboardView = () => {
                     // Held for WhatsApp approval — say whether the request went out.
                     if (data.approval.sent) toast.success(data.message, { duration: 8000 });
                     else toast(data.message, { icon: '⚠️', duration: 12000 });
-                    setActiveTab('history');
+                    setActiveTab('approvals');
                 } else {
                     toast.success('Post scheduled successfully!');
                     // The server flags a LinkedIn post scheduled past the
@@ -1052,14 +1079,14 @@ const MetaDashboardView = () => {
                 active={activeTab}
                 onNavigate={setActiveTab}
                 isConnected={isConnected}
+                approvalCount={approvalQueue.data?.pendingCount || 0}
                 pageCount={connection?.pages?.length || 0}
                 scheduledCount={upcomingPosts.length}
                 publishedCount={publishedPosts.length}
             />
 
             <div className="flex-1 min-w-0 flex flex-col">
-                {/* Mobile header. DashboardMobileNav is five equal items with no
-                    room for a sixth, and no brand or account affordance at all —
+                {/* Mobile header. The navigation has no brand or account affordance —
                     so the switcher gets its own strip up here instead. */}
                 <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between gap-3 px-4 py-3 border-b border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur">
                     <Logo className="h-6" />
@@ -1078,7 +1105,17 @@ const MetaDashboardView = () => {
                 </div>
 
 
-                {/* Social Profiles tab */}
+                {/* Approval Queue */}
+                {activeTab === 'approvals' && (
+                    <ApprovalQueuePanel
+                        key={activeWorkspaceId}
+                        queue={approvalQueue}
+                        token={session?.access_token}
+                        workspaceId={activeWorkspaceId}
+                        onChanged={() => loadScheduledPosts()}
+                    />
+                )}
+
                 {activeTab === 'profiles' && isConnected && !loading && (
                     <div className="mb-6">
                         <NotificationToggle authHeaders={getAuthHeaders} />
@@ -1396,6 +1433,7 @@ const MetaDashboardView = () => {
                 active={activeTab}
                 onNavigate={setActiveTab}
                 isConnected={isConnected}
+                approvalCount={approvalQueue.data?.pendingCount || 0}
             />
 
             {/* Connect Modal */}
@@ -1509,8 +1547,12 @@ const MetaDashboardView = () => {
                         onScheduleChange={(scheduledTime) => updateScheduleForm({ scheduledTime })}
                         approvalEnabled={approvalConfig.enabled}
                         savedApprovers={approvalConfig.savedPhones}
+                        savingApprovers={savingApprovers}
+                        reuseApprovers={reuseApprovers}
+                        onReuseApproversChange={setReuseApprovers}
+                        onSaveApprovers={saveApprovalNumbers}
                         approverPhones={scheduleFormData.approverPhones}
-                        onApproverChange={(approverPhones) => updateScheduleForm({ approverPhones })}
+                        onApproverChange={(approverPhones) => { ++approverEditVersion.current; updateScheduleForm({ approverPhones }); }}
                     />
                 )}
 
@@ -1536,7 +1578,8 @@ const MetaDashboardView = () => {
  */
 const MetaDashboardPage = () => {
     const { activeWorkspaceId } = useWorkspace();
-    return <MetaDashboardView key={activeWorkspaceId || 'none'} />;
+    const [activeTab, setActiveTab] = useState('create');
+    return <MetaDashboardView key={activeWorkspaceId || 'none'} activeTab={activeTab} setActiveTab={setActiveTab} />;
 };
 
 export default MetaDashboardPage;

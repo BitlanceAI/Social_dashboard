@@ -3,7 +3,7 @@
  *
  * Lifecycle of a post scheduled with approver numbers:
  *
- *   pending_approval ──(Approve tap)──▶ pending | scheduled ──▶ published
+ *   pending_approval ──(Approve tap)──▶ pending ──▶ published
  *                    └─(Reject tap)───▶ cancelled (+ optional reason)
  *
  * Every approver gets the interactive template plus a second message with
@@ -21,8 +21,7 @@
 import '../../config/env.js';
 
 import { supabaseAdmin } from '../../config/supabase.js';
-import MetaService from '../meta/meta.service.js';
-import { decryptData } from '../../shared/utils/encryption.js';
+import { settlePendingPost } from './approval.store.js';
 import { sendToWorkspace } from '../push/push.service.js';
 import {
     isWhatsAppEnabled,
@@ -70,11 +69,22 @@ export const getSavedApprovers = async (workspaceId) => {
     return Array.isArray(data?.phones) ? data.phones : [];
 };
 
-export const setSavedApprovers = async (workspaceId, phones) => {
+export const getDefaultApprovers = async (workspaceId) => {
+    const { data, error } = await db().from('approval_settings').select('default_phones')
+        .eq('workspace_id', workspaceId).maybeSingle();
+    // Older deployments retain manual approvals until the migration is applied.
+    if (error && ['42703', 'PGRST204'].includes(error.code)) return [];
+    if (error) throw error;
+    return cleanPhones(data?.default_phones || []);
+};
+
+export const setSavedApprovers = async (workspaceId, phones, defaultPhones) => {
     const list = cleanPhones(phones);
     const { error } = await db()
         .from('approval_settings')
-        .upsert({ workspace_id: workspaceId, phones: list, updated_at: new Date().toISOString() });
+        .upsert({ workspace_id: workspaceId, phones: list, updated_at: new Date().toISOString(),
+            ...(defaultPhones !== undefined ? { default_phones: cleanPhones(defaultPhones) } : {}),
+        });
     if (error) throw error;
     return list;
 };
@@ -151,108 +161,24 @@ export const requestApproval = async (post, opts = {}) => {
 
 // ── Activation after approval ─────────────────────────────────────────────
 
-/**
- * Hand a Facebook-only post to Meta natively when it is still inside Meta's
- * 10-minute-to-75-day window. Returns the Meta post id, or null when the
- * native path is not applicable or failed (the caller then falls back to our
- * own scheduler).
- */
-const tryNativeMetaSchedule = async (post) => {
-    if ((post.provider || 'meta') !== 'meta') return null;
-    const platforms = Array.isArray(post.platforms) && post.platforms.length ? post.platforms : ['facebook'];
-    if (!(platforms.includes('facebook') && !platforms.includes('instagram'))) return null;
-
-    const ahead = new Date(post.scheduled_time).getTime() - Date.now();
-    if (ahead < 10 * 60 * 1000 || ahead > 75 * 24 * 60 * 60 * 1000) return null;
-
-    try {
-        const { data: connection } = await db()
-            .from('meta_connections')
-            .select('access_token, is_active')
-            .eq('id', post.meta_connection_id)
-            .maybeSingle();
-        if (!connection?.is_active) return null;
-
-        const accessToken = decryptData(connection.access_token);
-        if (!accessToken) return null;
-        const metaService = new MetaService(accessToken);
-
-        const tokenResult = await metaService.getPageToken(post.page_id);
-        if (!tokenResult.success) return null;
-
-        const sched = await metaService.schedulePost(post.page_id, tokenResult.pageAccessToken, {
-            message: post.content,
-            link: post.link_url,
-            mediaUrls: post.media_urls || [],
-            scheduledTime: post.scheduled_time,
-        });
-        if (!sched.success) {
-            console.warn(`[Approvals] Native Meta schedule failed for ${post.id}: ${sched.error} — using server scheduler`);
-            return null;
-        }
-        return sched.data.post_id || sched.data.id || null;
-    } catch (err) {
-        console.warn(`[Approvals] Native Meta schedule error for ${post.id}: ${err.message} — using server scheduler`);
-        return null;
-    }
-};
-
-/**
- * Move an approved row into a publishable state. Atomic on status so two
- * concurrent approvals (two approvers, or WhatsApp + dashboard) cannot both
- * win. Returns the updated row, or null if it was no longer pending approval.
- */
-export const activateApprovedPost = async (post, { by = 'dashboard' } = {}) => {
-    const metaPostId = await tryNativeMetaSchedule(post);
-
-    const patch = {
+/** Approval only releases the row to the scheduler after an atomic claim. */
+export const activateApprovedPost = (post, { by = 'dashboard' } = {}) =>
+    settlePendingPost(db(), post, {
+        status: 'pending',
         approved_by: by,
         approved_at: new Date().toISOString(),
         awaiting_rejection_feedback: false,
-        ...(metaPostId
-            ? {
-                status: 'scheduled',
-                meta_post_id: metaPostId,
-                publish_results: { facebook: { scheduled: true, postId: metaPostId } },
-            }
-            : { status: 'pending' }),
-    };
+    });
 
-    const { data, error } = await db()
-        .from('scheduled_posts')
-        .update(patch)
-        .eq('id', post.id)
-        .eq('status', 'pending_approval')
-        .select()
-        .maybeSingle();
-    if (error) throw error;
-
-    if (!data && metaPostId) {
-        // Someone else settled the row first; do not leave a stray post on Meta.
-        console.warn(`[Approvals] Post ${post.id} settled concurrently — native schedule ${metaPostId} left on Meta, cancel it manually if needed`);
-    }
-    return data;
-};
-
-/** Cancel a row that is still awaiting approval. Returns the updated row or null. */
-export const rejectPendingPost = async (post, { by = 'dashboard', awaitFeedback = false } = {}) => {
-    const { data, error } = await db()
-        .from('scheduled_posts')
-        .update({
-            status: 'cancelled',
-            rejected_by: by,
-            rejected_at: new Date().toISOString(),
-            awaiting_rejection_feedback: awaitFeedback,
-        })
-        .eq('id', post.id)
-        .eq('status', 'pending_approval')
-        .select()
-        .maybeSingle();
-    if (error) throw error;
-    return data;
-};
-
-// ── Inbound from WhatsApp ─────────────────────────────────────────────────
+/** Store the decision and its optional reason together; first decision wins. */
+export const rejectPendingPost = (post, { by = 'dashboard', awaitFeedback = false, reason = '' } = {}) =>
+    settlePendingPost(db(), post, {
+        status: 'cancelled',
+        rejected_by: by,
+        rejected_at: new Date().toISOString(),
+        awaiting_rejection_feedback: awaitFeedback,
+        rejection_comment: String(reason).trim() || null,
+    });
 
 const notifyOthers = async (post, fromDigits, text) => {
     for (const phone of rowApproverPhones(post).filter((p) => p !== fromDigits)) {

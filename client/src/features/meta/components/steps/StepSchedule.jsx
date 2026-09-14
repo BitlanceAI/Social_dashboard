@@ -29,6 +29,10 @@ const StepSchedule = ({
     onScheduleChange,
     approvalEnabled = false,
     savedApprovers = [],
+    savingApprovers = false,
+    reuseApprovers = true,
+    onReuseApproversChange,
+    onSaveApprovers,
     approverPhones = '',
     onApproverChange = () => {},
 }) => {
@@ -129,7 +133,7 @@ const StepSchedule = ({
                         WhatsApp approval <span className="text-xs font-normal text-[var(--muted)]">(optional)</span>
                     </label>
                     <p className="text-xs text-[var(--muted)] mb-3 leading-relaxed">
-                        Each number gets the post on WhatsApp with Approve / Reject buttons. The post
+                        Enter your or your client?s WhatsApp number for reviewing posts. Each number gets the post on WhatsApp with Approve / Reject buttons. The post
                         is held until someone approves; the first decision wins.
                     </p>
                     <input
@@ -145,6 +149,16 @@ const StepSchedule = ({
                         Separate several numbers with commas. 10-digit numbers are treated as Indian (+91).
                     </p>
 
+                    <div className="mt-3 space-y-2">
+                        <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+                            <input type="checkbox" checked={reuseApprovers} onChange={e => onReuseApproversChange?.(e.target.checked)} />
+                            Reuse these numbers next time
+                        </label>
+                        <button type="button" disabled={savingApprovers} onClick={onSaveApprovers} className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--text)] disabled:opacity-50">
+                            {savingApprovers ? 'Saving?' : 'Save approval numbers'}
+                        </button>
+                        <p className="text-xs text-[var(--muted)]">Saved for this workspace. Clear the field to skip approval for this post. Uncheck reuse and save to stop filling numbers automatically.</p>
+                    </div>
                     {savedApprovers.length > 0 && (
                         <div className="mt-4">
                             <p className="text-xs font-medium text-[var(--text)] mb-2">Previously used</p>
