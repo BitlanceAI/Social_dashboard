@@ -727,7 +727,8 @@ class MetaService {
             'pages_read_engagement',    // read Page fields + post comments
             'pages_manage_posts',       // publish to a Facebook Page
             'instagram_basic',          // read IG profile + media
-            'instagram_content_publish' // publish to IG Business account
+            'instagram_content_publish', // publish to IG Business account
+            'business_management'       // read & manage Business Manager assets
         ];
     }
 
