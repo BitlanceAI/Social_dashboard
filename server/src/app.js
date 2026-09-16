@@ -25,6 +25,8 @@ import templatesRoutes from './modules/templates/templates.routes.js';
 import designRoutes from './modules/design/design.routes.js';
 import occasionsRoutes from './modules/occasions/occasions.routes.js';
 import aiRoutes from './modules/ai/ai.routes.js';
+import whatsappRoutes from './modules/whatsapp/whatsapp.routes.js';
+import approvalRoutes from './modules/approvals/approval.routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -61,6 +63,8 @@ app.use('/api/templates', templatesRoutes); // graphic template catalog + admin 
 app.use('/api/design', designRoutes); // template-based image generation jobs
 app.use('/api/occasions', occasionsRoutes); // Indian occasion calendar (dates resolved server-side)
 app.use('/api/ai', aiRoutes); // AI copywriting (post captions via Perplexity)
+app.use('/api/whatsapp', whatsappRoutes); // WhatsApp Cloud API webhook (approval button taps) + status
+app.use('/api/approvals', approvalRoutes); // post approval: saved approvers, dashboard approve/reject/resend
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date() });

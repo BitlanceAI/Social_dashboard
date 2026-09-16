@@ -13,6 +13,7 @@ import {
     PenSquare,
     LogOut,
     ShieldCheck,
+    CheckCircle2,
     CreditCard,
     Sun,
     Moon,
@@ -31,6 +32,7 @@ import {
 
 const NAV = [
     { id: 'create', label: 'Create a Post', short: 'Create', icon: PenSquare, needsConnection: false },
+    { id: 'approvals', label: 'Approval Queue', short: 'Review', icon: CheckCircle2, needsConnection: false },
     { id: 'profiles', label: 'Social Profiles', short: 'Profiles', icon: UserCircle, needsConnection: false },
     { id: 'library', label: 'Media Library', short: 'Library', icon: HardDrive, needsConnection: false },
     { id: 'history', label: 'Post History', short: 'History', icon: Send, needsConnection: true },
@@ -51,9 +53,9 @@ const footerLink =
 
 const DashboardSidebar = ({
     active, onNavigate, isConnected,
-    pageCount = 0, scheduledCount = 0, publishedCount = 0,
+    pageCount = 0, scheduledCount = 0, publishedCount = 0, approvalCount = 0,
 }) => {
-    const counts = { profiles: pageCount, scheduled: scheduledCount, history: publishedCount };
+    const counts = { approvals: approvalCount, profiles: pageCount, scheduled: scheduledCount, history: publishedCount };
     const { theme, toggleTheme } = useTheme();
     const { user, signOut } = useAuth();
     const navigate = useNavigate();
@@ -147,12 +149,12 @@ const DashboardSidebar = ({
  * Mobile navigation — floating bar shown only below the lg breakpoint,
  * where the sidebar is hidden.
  */
-export const DashboardMobileNav = ({ active, onNavigate, isConnected }) => (
+export const DashboardMobileNav = ({ active, onNavigate, isConnected, approvalCount = 0 }) => (
     <>
 
         <nav className="lg:hidden fixed inset-x-0 bottom-0 z-40 px-3 pb-[env(safe-area-inset-bottom)]">
             <div className="mx-auto max-w-md mb-3 flex items-stretch gap-1 rounded-2xl border border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-xl shadow-lg p-1.5">
-                {NAV.map(({ id, short, icon: Icon, needsConnection }) => {
+                {NAV.map(({ id, label, short, icon: Icon, needsConnection }) => {
                     const disabled = needsConnection && !isConnected;
                     const isActive = active === id && !disabled;
                     return (
@@ -160,7 +162,8 @@ export const DashboardMobileNav = ({ active, onNavigate, isConnected }) => (
                             key={id}
                             onClick={() => !disabled && onNavigate(id)}
                             disabled={disabled}
-                            className={`flex-1 min-w-0 flex flex-col items-center gap-1 py-2 rounded-xl transition-colors ${
+                            aria-label={id === 'approvals' ? `${label}, ${approvalCount} pending` : label}
+                            className={`relative flex-1 min-w-0 flex flex-col items-center gap-1 py-2 rounded-xl transition-colors ${
                                 disabled
                                     ? 'text-[var(--muted-2)]'
                                     : isActive
@@ -169,6 +172,7 @@ export const DashboardMobileNav = ({ active, onNavigate, isConnected }) => (
                             }`}
                         >
                             <Icon className="h-5 w-5 shrink-0" />
+                            {id === 'approvals' && approvalCount > 0 && <span className="absolute top-0 right-0 rounded-full bg-[var(--accent)] text-[var(--bg)] px-1 text-[9px]">{approvalCount > 99 ? '99+' : approvalCount}</span>}
                             <span className="text-[9px] font-mono uppercase tracking-widest leading-none truncate w-full text-center">
                                 {short}
                             </span>

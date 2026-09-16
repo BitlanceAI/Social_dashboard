@@ -28,6 +28,8 @@ import { createClient } from '@supabase/supabase-js';
 import LinkedInService from './linkedin.service.js';
 import { authenticateUser } from '../../middleware/auth.js';
 import { resolveWorkspace } from '../../middleware/workspace.js';
+import { cleanPhones, isWhatsAppEnabled } from '../whatsapp/whatsapp.service.js';
+import { requestApproval, rememberApprovers } from '../approvals/approval.service.js';
 import { encryptData, decryptData } from '../../shared/utils/encryption.js';
 import { uploadPostMedia, postMediaUpload } from '../../shared/storage/postMedia.js';
 
@@ -703,6 +705,16 @@ router.post('/posts/schedule', async (req, res) => {
         const expiresAt = connection.token_expires_at ? new Date(connection.token_expires_at) : null;
         const expiresBeforePublish = expiresAt && when > expiresAt;
 
+        // WhatsApp approval (opt-in): held as 'pending_approval' until an
+        // approver taps Approve; the scheduler only publishes 'pending'.
+        const approverPhones = cleanPhones(req.body.approverPhones ?? req.body.approverPhone);
+        if (approverPhones.length && !isWhatsAppEnabled()) {
+            return res.status(400).json({
+                error: 'WhatsApp approvals are not configured on this server. Remove the approver numbers or ask an admin to set WHATSAPP_GLOBAL_TOKEN and WHATSAPP_PHONE_ID.'
+            });
+        }
+        const needsApproval = approverPhones.length > 0;
+
         const { data: scheduledPost, error } = await supabase
             .from('scheduled_posts')
             .insert({
@@ -718,12 +730,33 @@ router.post('/posts/schedule', async (req, res) => {
                 link_url: linkUrl || null,
                 scheduled_time: scheduledTime,
                 timezone: timezone || 'UTC',
-                status: 'pending',
+                status: needsApproval ? 'pending_approval' : 'pending',
+                ...(needsApproval ? { approver_phones: approverPhones } : {}),
             })
             .select()
             .single();
 
         if (error) throw error;
+
+        if (needsApproval) {
+            await rememberApprovers(req.workspaceId, approverPhones);
+            const approval = await requestApproval(scheduledPost)
+                .catch((err) => ({ sent: false, error: err.message }));
+
+            console.log(`📅 LinkedIn post awaiting WhatsApp approval for ${scheduledTime} as ${actor.name}${approval.sent ? '' : ` (send failed: ${approval.error})`}`);
+
+            return res.json({
+                success: true,
+                approval,
+                message: approval.sent
+                    ? `Sent to WhatsApp for approval (${approval.reached}/${approval.total} approver${approval.total === 1 ? '' : 's'} reached). It publishes once approved.`
+                    : `Saved as awaiting approval, but the WhatsApp request could not be sent: ${approval.error}. Use "Resend" to try again.`,
+                post: scheduledPost,
+                ...(expiresBeforePublish
+                    ? { warning: `This is scheduled after your LinkedIn connection expires on ${expiresAt.toDateString()}. Reconnect before then or the post will fail.` }
+                    : {}),
+            });
+        }
 
         console.log(`📅 LinkedIn post scheduled for ${scheduledTime} as ${actor.name}`);
 

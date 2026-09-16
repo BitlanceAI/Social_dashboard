@@ -20,6 +20,8 @@ import { resolveWorkspace } from '../../middleware/workspace.js';
 import { encryptData, decryptData } from '../../shared/utils/encryption.js';
 import { uploadPostMedia, postMediaUpload } from '../../shared/storage/postMedia.js';
 import { getEntitlement, dailyPostCapExceeded } from '../billing/billing.service.js';
+import { cleanPhones, isWhatsAppEnabled } from '../whatsapp/whatsapp.service.js';
+import { requestApproval, rememberApprovers } from '../approvals/approval.service.js';
 
 const router = express.Router();
 
@@ -406,12 +408,23 @@ router.post('/connect-api-key', async (req, res) => {
 
         console.log(`✅ [Meta Connect] Meta account connected successfully for user ${userId}`);
 
+        // A connection with no Pages is stored (the token is still needed to
+        // re-run the flow) but it cannot publish anything, so say so plainly
+        // instead of reporting success. The usual cause is signing in with a
+        // Facebook account that has no role on the Page -- the browser reuses
+        // whichever Facebook session is already open, which is easy to miss.
+        const noPages = pagesResult.success && (pagesResult.pages?.length ?? 0) === 0;
+
         res.json({
             success: true,
             message: 'Meta account connected successfully',
             profile: profile.data,
             pages: pagesResult.success ? pagesResult.pages : [],
-            expiresAt: validation.expiresAt
+            expiresAt: validation.expiresAt,
+            ...(noPages ? {
+                warning: `Signed in as ${profile.data?.name || 'this account'}, which does not manage any Facebook Page that was shared with the app. `
+                    + 'Either sign in with the account that has a Page role, or assign this account to the Page in Meta Business settings, then connect again.'
+            } : {})
         });
 
     } catch (error) {
@@ -1010,6 +1023,56 @@ router.post('/posts/schedule', async (req, res) => {
         if (platforms.includes('instagram') && !page.instagram_business_account?.id) {
             return res.status(400).json({
                 error: 'No Instagram Business account is linked to this Page. Link one in Meta Business Suite, then refresh accounts.'
+            });
+        }
+
+        // WhatsApp approval (opt-in): with approver numbers the row is held as
+        // 'pending_approval' and an Approve/Reject template goes to each
+        // approver. Nothing is handed to Meta until someone approves — the
+        // native path is re-evaluated at approval time (approval.service.js).
+        const approverPhones = cleanPhones(req.body.approverPhones ?? req.body.approverPhone);
+        if (approverPhones.length) {
+            if (!isWhatsAppEnabled()) {
+                return res.status(400).json({
+                    error: 'WhatsApp approvals are not configured on this server. Remove the approver numbers or ask an admin to set WHATSAPP_GLOBAL_TOKEN and WHATSAPP_PHONE_ID.'
+                });
+            }
+
+            const { data: scheduledPost, error } = await supabase
+                .from('scheduled_posts')
+                .insert({
+                    workspace_id: req.workspaceId,
+                    user_id: userId,
+                    meta_connection_id: connection.id,
+                    page_id: pageId,
+                    page_name: page.name,
+                    platforms,
+                    content,
+                    media_urls: mediaUrls || [],
+                    link_url: linkUrl || null,
+                    scheduled_time: scheduledTime,
+                    timezone: timezone || 'UTC',
+                    status: 'pending_approval',
+                    approver_phones: approverPhones,
+                })
+                .select()
+                .single();
+            if (error) throw error;
+
+            await rememberApprovers(req.workspaceId, approverPhones);
+            const approval = await requestApproval(scheduledPost)
+                .catch((err) => ({ sent: false, error: err.message }));
+
+            console.log(`📅 Post awaiting WhatsApp approval for ${scheduledTime} on ${page.name} → ${approverPhones.length} approver(s)${approval.sent ? '' : ` (send failed: ${approval.error})`}`);
+
+            return res.json({
+                success: true,
+                native: false,
+                approval,
+                message: approval.sent
+                    ? `Sent to WhatsApp for approval (${approval.reached}/${approval.total} approver${approval.total === 1 ? '' : 's'} reached). It publishes once approved.`
+                    : `Saved as awaiting approval, but the WhatsApp request could not be sent: ${approval.error}. Use "Resend" to try again.`,
+                post: scheduledPost,
             });
         }
 

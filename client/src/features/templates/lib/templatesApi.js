@@ -1,6 +1,20 @@
 import { supabase } from '@/shared/lib/supabase';
 import API_BASE_URL from '@/shared/config';
 
+export const savedTemplateDetails = async (workspaceId, details) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session || !workspaceId) throw new Error('Select a workspace and sign in first.');
+    const response = await fetch(`${API_BASE_URL}/api/design/saved-details`, {
+        method: details ? 'PUT' : 'GET',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'x-workspace-id': workspaceId,
+            'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        ...(details ? { body: JSON.stringify(details) } : {}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not access saved details.');
+    return data.details;
+};
+
 /** Public gallery reads (no auth needed for active templates). */
 export const fetchTemplates = async ({ niche, search } = {}) => {
     const params = new URLSearchParams();
