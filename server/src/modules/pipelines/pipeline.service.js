@@ -40,8 +40,8 @@ export const createPipeline = async (workspaceId, userId, payload) => {
         provider = 'linkedin',
         sheetUrl = null,
         brandLogoText = 'Rahul Saini',
-        captionPromptTemplate = null,
-        imagePromptTemplate = null,
+        captionPromptTemplate = payload.captionPromptTemplate || payload.caption_prompt_template || null,
+        imagePromptTemplate = payload.imagePromptTemplate || payload.image_prompt_template || null,
         autoPublish = true,
     } = payload;
 
@@ -79,7 +79,9 @@ export const updatePipeline = async (pipelineId, workspaceId, patch) => {
     if (patch.sheetUrl !== undefined) updateData.sheet_url = patch.sheetUrl;
     if (patch.brandLogoText !== undefined) updateData.brand_logo_text = patch.brandLogoText;
     if (patch.captionPromptTemplate !== undefined) updateData.caption_prompt_template = patch.captionPromptTemplate;
+    if (patch.caption_prompt_template !== undefined) updateData.caption_prompt_template = patch.caption_prompt_template;
     if (patch.imagePromptTemplate !== undefined) updateData.image_prompt_template = patch.imagePromptTemplate;
+    if (patch.image_prompt_template !== undefined) updateData.image_prompt_template = patch.image_prompt_template;
     if (patch.autoPublish !== undefined) updateData.auto_publish = patch.autoPublish;
     if (patch.status !== undefined) updateData.status = patch.status;
 
