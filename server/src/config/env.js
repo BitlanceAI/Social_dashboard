@@ -55,7 +55,9 @@ export const env = {
             'https://automation-dashboard-ten.vercel.app',
             'https://automation-dashboard-git-main-bitlanceais-projects.vercel.app',
             'https://bitlancetechhub.com',
+            'https://social.bitlancetechhub.com',
             'https://www.bitlancetechhub.com',
+            'https://automation.bitlancetechhub.com'
         ],
     // Vercel preview deployments get a fresh URL per commit, so match the whole
     // team namespace rather than one project name.

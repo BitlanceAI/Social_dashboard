@@ -23,7 +23,25 @@ export const authenticateUser = async (req, res, next) => {
         // Attach user and active workspace to request
         req.user = user;
         req.token = token;
-        req.workspaceId = req.headers['x-workspace-id'] || null;
+
+        let rawWsId = req.headers['x-workspace-id'];
+        if (rawWsId === 'null' || rawWsId === 'undefined' || !rawWsId) {
+            rawWsId = null;
+        }
+
+        if (!rawWsId && user.id) {
+            const { data } = await supabase
+                .from('workspace_members')
+                .select('workspace_id')
+                .eq('user_id', user.id)
+                .limit(1)
+                .maybeSingle();
+            if (data?.workspace_id) {
+                rawWsId = data.workspace_id;
+            }
+        }
+
+        req.workspaceId = rawWsId || null;
         next();
     } catch (error) {
         console.error('Auth Middleware Error:', error);
@@ -33,3 +51,4 @@ export const authenticateUser = async (req, res, next) => {
 
 // Alias for route compatibility
 export const protect = authenticateUser;
+

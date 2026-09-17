@@ -21,6 +21,7 @@ import { sendToWorkspace } from '../push/push.service.js';
 import { sweepExpiredStorage } from '../storage/storage.service.js';
 import { sweepExpiredDesigns } from '../design/design.service.js';
 import { sendApprovalReminders } from '../approvals/approval.service.js';
+import { runPipeline } from '../pipelines/pipeline_executor.service.js';
 
 let supabase;
 
@@ -137,6 +138,7 @@ export const startPostScheduler = () => {
         }
 
         await checkAndPublishPosts();
+        await checkAndRunPipelines();
 
         // Nudges approvers who have not tapped Approve/Reject yet (no-op
         // without WhatsApp credentials). Cheap: a single indexed query.
@@ -156,6 +158,37 @@ export const startPostScheduler = () => {
 
     runScheduler();
     setInterval(runScheduler, CHECK_INTERVAL);
+};
+
+const checkAndRunPipelines = async () => {
+    try {
+        const nowTime = new Date().toTimeString().slice(0, 5); // "09:30"
+        const { data: pipelines, error } = await supabase
+            .from('content_pipelines')
+            .select('*')
+            .eq('status', 'active');
+
+        if (error || !pipelines || pipelines.length === 0) return;
+
+        for (const pipeline of pipelines) {
+            const triggerTime = (pipeline.trigger_time || '09:30:00').slice(0, 5);
+            if (triggerTime === nowTime) {
+                const lastRun = pipeline.last_run_at ? new Date(pipeline.last_run_at) : null;
+                const hoursSinceLastRun = lastRun ? (Date.now() - lastRun.getTime()) / (1000 * 60 * 60) : 999;
+
+                if (hoursSinceLastRun >= 20) {
+                    console.log(`[Scheduler] Triggering scheduled pipeline run for "${pipeline.name}" (${pipeline.id})...`);
+                    await runPipeline(pipeline.id).catch((err) => {
+                        console.error(`[Scheduler] Pipeline "${pipeline.name}" execution error:`, err.message);
+                    });
+                }
+            }
+        }
+    } catch (err) {
+        if (!isMissingSchema(err)) {
+            console.error('[Scheduler] checkAndRunPipelines error:', err.message);
+        }
+    }
 };
 
 const checkAndPublishPosts = async () => {

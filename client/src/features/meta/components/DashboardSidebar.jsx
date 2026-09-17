@@ -17,6 +17,7 @@ import {
     CreditCard,
     Sun,
     Moon,
+    Bot,
 } from 'lucide-react';
 
 /**
@@ -32,6 +33,7 @@ import {
 
 const NAV = [
     { id: 'create', label: 'Create a Post', short: 'Create', icon: PenSquare, needsConnection: false },
+    { id: 'pipelines', label: 'AI Pipelines', short: 'Pipelines', icon: Bot, needsConnection: false },
     { id: 'approvals', label: 'Approval Queue', short: 'Review', icon: CheckCircle2, needsConnection: false },
     { id: 'profiles', label: 'Social Profiles', short: 'Profiles', icon: UserCircle, needsConnection: false },
     { id: 'library', label: 'Media Library', short: 'Library', icon: HardDrive, needsConnection: false },
@@ -95,7 +97,13 @@ const DashboardSidebar = ({
                     return (
                         <button
                             key={id}
-                            onClick={() => !disabled && onNavigate(id)}
+                            onClick={() => {
+                                if (id === 'pipelines') {
+                                    navigate('/pipelines');
+                                } else if (!disabled) {
+                                    onNavigate(id);
+                                }
+                            }}
                             disabled={disabled}
                             className={itemClass(disabled, isActive)}
                         >
@@ -113,6 +121,10 @@ const DashboardSidebar = ({
 
             {/* Footer */}
             <div className="mt-auto pt-6 space-y-1">
+                <Link to="/pipelines" className={footerLink}>
+                    <Bot className="h-4 w-4 shrink-0 text-cyan-400" />
+                    AI Pipelines
+                </Link>
                 <button onClick={toggleTheme} className={footerLink}>
                     {theme === 'dark' ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
                     {theme === 'dark' ? 'Light mode' : 'Dark mode'}
@@ -160,7 +172,13 @@ export const DashboardMobileNav = ({ active, onNavigate, isConnected, approvalCo
                     return (
                         <button
                             key={id}
-                            onClick={() => !disabled && onNavigate(id)}
+                            onClick={() => {
+                                if (id === 'pipelines') {
+                                    window.location.href = '/pipelines';
+                                } else if (!disabled) {
+                                    onNavigate(id);
+                                }
+                            }}
                             disabled={disabled}
                             aria-label={id === 'approvals' ? `${label}, ${approvalCount} pending` : label}
                             className={`relative flex-1 min-w-0 flex flex-col items-center gap-1 py-2 rounded-xl transition-colors ${

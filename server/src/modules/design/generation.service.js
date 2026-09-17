@@ -14,7 +14,7 @@ import '../../config/env.js';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || null;
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
-const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
+const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2.5-flare';
 const REQUEST_TIMEOUT_MS = 180_000; // image renders routinely take >60s
 
 const SUPPORTED_SIZES = [[1024, 1024], [1024, 1536], [1536, 1024]];
@@ -37,7 +37,7 @@ export const toOpenAISize = (imageSize) => {
  * Render one image. Returns { buffer, contentType, size, model }.
  * Throws with a `.status` for the controller's error mapping.
  */
-export const generateImage = async ({ prompt, imageSize, quality = 'high' } = {}) => {
+export const generateImage = async ({ prompt, imageSize, quality = 'low' } = {}) => {
     if (!OPENAI_API_KEY) {
         const e = new Error('Image generation is not configured (OPENAI_API_KEY missing)');
         e.status = 503;
@@ -55,7 +55,7 @@ export const generateImage = async ({ prompt, imageSize, quality = 'high' } = {}
         prompt: String(prompt).trim(),
         n: 1,
         size,
-        quality: QUALITIES.has(quality) ? quality : 'high',
+        quality: QUALITIES.has(quality) ? quality : 'low',
     };
 
     let res;

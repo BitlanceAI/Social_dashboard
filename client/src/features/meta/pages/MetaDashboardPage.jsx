@@ -431,14 +431,14 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
     };
 
     useEffect(() => {
-        if (activeTab === 'history' && connection) {
+        if (activeTab === 'history') {
             // Post History merges live Meta posts with our tracked scheduled/
             // failed rows, so both sources load when the tab opens.
-            if (platformHistory === null && !historyLoading) loadPlatformHistory();
+            if (connection && platformHistory === null && !historyLoading) loadPlatformHistory();
             loadScheduledPosts();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeTab, connection]);
+    }, [activeTab, connection, liConnection]);
 
     const loadScheduledPosts = async () => {
         try {
@@ -1029,6 +1029,8 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
         raw: p,
     }));
 
+    const livePostIds = new Set(liveHistoryItems.map((i) => i.raw?.id).filter(Boolean));
+
     const dbHistoryItems = (scheduledPosts || []).flatMap((p) => {
         const isLinkedIn = p.provider === 'linkedin';
         const platforms = isLinkedIn
@@ -1040,8 +1042,15 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
         else if (['pending', 'processing', 'scheduled'].includes(p.status)) status = 'scheduled';
         else if (p.status === 'published') status = 'published';
         else return []; // cancelled etc. never surface
-        // Meta published rows would duplicate the live feed — skip them there.
-        if (status === 'published' && !isLinkedIn) return [];
+
+        // Only skip Meta published rows if they ALREADY exist in liveHistoryItems to avoid duplicate display
+        if (status === 'published' && !isLinkedIn && p.meta_post_id && livePostIds.has(p.meta_post_id)) {
+            return [];
+        }
+
+        const permalink = p.publish_results?.facebook?.permalink
+            || (p.meta_post_id ? `https://facebook.com/${p.meta_post_id}` : null);
+
         return [{
             key: `db-${p.id}`,
             source: 'db',
@@ -1052,6 +1061,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
             mediaUrl: (p.media_urls && p.media_urls[0]) || null,
             pageName: p.page_name,
             when: p.published_at || p.scheduled_time,
+            permalink,
             error: p.error_message,
             raw: p,
         }];
@@ -1075,349 +1085,354 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
 
             <div className="flex">
 
-            <DashboardSidebar
-                active={activeTab}
-                onNavigate={setActiveTab}
-                isConnected={isConnected}
-                approvalCount={approvalQueue.data?.pendingCount || 0}
-                pageCount={connection?.pages?.length || 0}
-                scheduledCount={upcomingPosts.length}
-                publishedCount={publishedPosts.length}
-            />
+                <DashboardSidebar
+                    active={activeTab}
+                    onNavigate={setActiveTab}
+                    isConnected={isConnected}
+                    approvalCount={approvalQueue.data?.pendingCount || 0}
+                    pageCount={connection?.pages?.length || 0}
+                    scheduledCount={upcomingPosts.length}
+                    publishedCount={publishedPosts.length}
+                />
 
-            <div className="flex-1 min-w-0 flex flex-col">
-                {/* Mobile header. The navigation has no brand or account affordance —
+                <div className="flex-1 min-w-0 flex flex-col">
+                    {/* Mobile header. The navigation has no brand or account affordance —
                     so the switcher gets its own strip up here instead. */}
-                <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between gap-3 px-4 py-3 border-b border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur">
-                    <Logo className="h-6" />
-                    <div className="flex items-center gap-2">
-                        <NotificationsBell posts={scheduledPosts} liConnection={liConnection} />
-                        <WorkspaceSwitcher compact />
+                    <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between gap-3 px-4 py-3 border-b border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur">
+                        <Logo className="h-6" />
+                        <div className="flex items-center gap-2">
+                            <NotificationsBell posts={scheduledPosts} liConnection={liConnection} />
+                            <WorkspaceSwitcher compact />
+                        </div>
                     </div>
-                </div>
 
-            <main className="flex-1 min-w-0 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-10 py-6 sm:py-10 pb-32 lg:pb-16">
+                    <main className="flex-1 min-w-0 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-10 py-6 sm:py-10 pb-32 lg:pb-16">
 
-                {/* Desktop: the sidebar carries nav, so the bell gets a slim
+                        {/* Desktop: the sidebar carries nav, so the bell gets a slim
                     utility row at the top of the content column. */}
-                <div className="hidden lg:flex justify-end mb-4">
-                    <NotificationsBell posts={scheduledPosts} liConnection={liConnection} />
-                </div>
-
-
-                {/* Approval Queue */}
-                {activeTab === 'approvals' && (
-                    <ApprovalQueuePanel
-                        key={activeWorkspaceId}
-                        queue={approvalQueue}
-                        token={session?.access_token}
-                        workspaceId={activeWorkspaceId}
-                        onChanged={() => loadScheduledPosts()}
-                    />
-                )}
-
-                {activeTab === 'profiles' && isConnected && !loading && (
-                    <div className="mb-6">
-                        <NotificationToggle authHeaders={getAuthHeaders} />
-                    </div>
-                )}
-
-                {activeTab === 'profiles' && (
-                    <SocialProfilesPanel
-                        loading={loading}
-                        isConnected={isConnected}
-                        targets={targets}
-                        metaScopes={connection ? {
-                            granted: connection.grantedScopes || [],
-                            required: connection.requiredScopes || [],
-                        } : null}
-                        instagramAccounts={connection?.instagramAccounts || []}
-                        linkedinConnection={liConnection}
-                        postCounts={postCounts}
-                        onAddProfile={() => setShowConnectModal(true)}
-                        onAssignPages={connection?.availablePages?.length && workspaces.length > 1
-                            ? () => setShowAssignPages(true)
-                            : null}
-                        onRefresh={handleRefresh}
-                        onRemoveTarget={handleRemoveTarget}
-                        refreshing={refreshing}
-                    />
-                )}
-
-                {/* Post History tab — live feed straight from Meta, so it
-                    includes posts made natively on FB/IG, not just ours. */}
-                {activeTab === 'history' && isConnected && connection && (
-                    <div className="bg-[var(--surface)] rounded-3xl border border-[var(--border)] p-5 sm:p-6 mb-6 sm:mb-8">
-                        <div className="flex items-center justify-between mb-1">
-                            <h3 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)]">All Posts</h3>
-                            <button
-                                onClick={() => { loadPlatformHistory(); loadScheduledPosts(); }}
-                                disabled={historyLoading}
-                                className="p-2 rounded-xl border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--bg)] transition-colors disabled:opacity-60"
-                                title="Refresh"
-                            >
-                                <RefreshCw className={`h-4 w-4 ${historyLoading ? 'animate-spin' : ''}`} />
-                            </button>
-                        </div>
-                        <p className="text-xs text-[var(--muted)] mb-4">
-                            Every post on your connected accounts — published, scheduled, or failed,
-                            posted through Botlance or natively.
-                        </p>
-
-                        {/* Status + platform dropdown filters */}
-                        <div className="flex flex-wrap items-center gap-3 mb-4">
-                            <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
-                                Status
-                                <select
-                                    value={historyStatus}
-                                    onChange={(e) => setHistoryStatus(e.target.value)}
-                                    className="px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)]"
-                                >
-                                    <option value="all">All</option>
-                                    <option value="published">Published</option>
-                                    <option value="scheduled">Scheduled</option>
-                                    <option value="awaiting_approval">Awaiting approval</option>
-                                    <option value="failed">Failed</option>
-                                </select>
-                            </label>
-                            <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
-                                Platform
-                                <select
-                                    value={historyPlatform}
-                                    onChange={(e) => setHistoryPlatform(e.target.value)}
-                                    className="px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)]"
-                                >
-                                    <option value="all">All</option>
-                                    <option value="facebook">Facebook</option>
-                                    <option value="instagram">Instagram</option>
-                                    <option value="linkedin">LinkedIn</option>
-                                </select>
-                            </label>
-                            <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
-                                Date
-                                <select
-                                    value={historyRange}
-                                    onChange={(e) => setHistoryRange(e.target.value)}
-                                    className="px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)]"
-                                >
-                                    <option value="all">All time</option>
-                                    <option value="24h">Last 24 hours</option>
-                                    <option value="7d">Last 7 days</option>
-                                    <option value="30d">Last 30 days</option>
-                                    <option value="90d">Last 90 days</option>
-                                </select>
-                            </label>
-                            <span className="text-[11px] text-[var(--muted-2)]">
-                                {filteredHistory.length} post{filteredHistory.length === 1 ? '' : 's'}
-                            </span>
+                        <div className="hidden lg:flex justify-end mb-4">
+                            <NotificationsBell posts={scheduledPosts} liConnection={liConnection} />
                         </div>
 
-                        {/* One feed failing must be visible, not silent — this is
-                            how "only Instagram shows up" gets diagnosed. */}
-                        {historyFeedErrors.length > 0 && (
-                            <div className="flex items-start gap-2.5 rounded-xl border px-4 py-3 mb-4"
-                                style={{ borderColor: 'rgba(251, 191, 36, 0.4)', background: 'rgba(251, 191, 36, 0.08)' }}>
-                                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" style={{ color: '#FBBF24' }} />
-                                <div className="text-[12px] text-[var(--text)] leading-relaxed min-w-0">
-                                    <p className="font-medium mb-0.5">Some feeds could not be read:</p>
-                                    {historyFeedErrors.map((msg, i) => (
-                                        <p key={i} className="text-[var(--muted)] break-words">{msg}</p>
-                                    ))}
-                                </div>
+
+                        {/* Approval Queue */}
+                        {activeTab === 'approvals' && (
+                            <ApprovalQueuePanel
+                                key={activeWorkspaceId}
+                                queue={approvalQueue}
+                                token={session?.access_token}
+                                workspaceId={activeWorkspaceId}
+                                onChanged={() => loadScheduledPosts()}
+                            />
+                        )}
+
+                        {activeTab === 'profiles' && isConnected && !loading && (
+                            <div className="mb-6">
+                                <NotificationToggle authHeaders={getAuthHeaders} />
                             </div>
                         )}
 
-                        {historyLoading && platformHistory === null ? (
-                            <div className="py-10 text-center text-sm text-[var(--muted)]">Loading your posts…</div>
-                        ) : allHistoryItems.length === 0 ? (
-                            <div className="py-10 text-center">
-                                <Send className="h-8 w-8 mx-auto mb-3 text-[var(--muted-2)]" />
-                                <p className="text-sm text-[var(--muted)]">
-                                    No posts on your connected accounts yet.
+                        {activeTab === 'profiles' && (
+                            <SocialProfilesPanel
+                                loading={loading}
+                                isConnected={isConnected}
+                                targets={targets}
+                                metaScopes={connection ? {
+                                    granted: connection.grantedScopes || [],
+                                    required: connection.requiredScopes || [],
+                                } : null}
+                                instagramAccounts={connection?.instagramAccounts || []}
+                                linkedinConnection={liConnection}
+                                postCounts={postCounts}
+                                onAddProfile={() => setShowConnectModal(true)}
+                                onAssignPages={connection?.availablePages?.length && workspaces.length > 1
+                                    ? () => setShowAssignPages(true)
+                                    : null}
+                                onRefresh={handleRefresh}
+                                onRemoveTarget={handleRemoveTarget}
+                                refreshing={refreshing}
+                            />
+                        )}
+
+                        {/* Post History tab — live feed straight from Meta, so it
+                    includes posts made natively on FB/IG, not just ours. */}
+                        {activeTab === 'history' && isConnected && (
+                            <div className="bg-[var(--surface)] rounded-3xl border border-[var(--border)] p-5 sm:p-6 mb-6 sm:mb-8">
+                                <div className="flex items-center justify-between mb-1">
+                                    <h3 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)]">All Posts</h3>
+                                    <button
+                                        onClick={() => { loadPlatformHistory(); loadScheduledPosts(); }}
+                                        disabled={historyLoading}
+                                        className="p-2 rounded-xl border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--bg)] transition-colors disabled:opacity-60"
+                                        title="Refresh"
+                                    >
+                                        <RefreshCw className={`h-4 w-4 ${historyLoading ? 'animate-spin' : ''}`} />
+                                    </button>
+                                </div>
+                                <p className="text-xs text-[var(--muted)] mb-4">
+                                    Every post on your connected accounts — published, scheduled, or failed,
+                                    posted through Botlance or natively.
                                 </p>
-                            </div>
-                        ) : filteredHistory.length === 0 ? (
-                            <p className="py-8 text-center text-sm text-[var(--muted)]">
-                                No posts match these filters.
-                            </p>
-                        ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                {filteredHistory.map((it) => {
-                                    const Icon = platformMeta(it.platform).Icon;
-                                    const statusConfig = getStatusConfig(it.status);
-                                    return (
-                                        <div
-                                            key={it.key}
-                                            className="flex flex-col gap-3 p-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)]"
+
+                                {/* Status + platform dropdown filters */}
+                                <div className="flex flex-wrap items-center gap-3 mb-4">
+                                    <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                                        Status
+                                        <select
+                                            value={historyStatus}
+                                            onChange={(e) => setHistoryStatus(e.target.value)}
+                                            className="px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)]"
                                         >
-                                            <div className="flex items-start gap-3">
-                                                {it.mediaUrl && (
-                                                    <img
-                                                        src={it.mediaUrl}
-                                                        alt=""
-                                                        loading="lazy"
-                                                        className="w-14 h-14 rounded-xl object-cover border border-[var(--border)] shrink-0"
-                                                    />
-                                                )}
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-sm text-[var(--text)] line-clamp-3 mb-2">
-                                                        {it.message || <span className="text-[var(--muted-2)]">No caption</span>}
-                                                    </p>
-                                                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
-                                                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-[var(--accent-muted)] text-[var(--accent)] font-medium">
-                                                            <Icon className="h-3 w-3" />
-                                                            {it.pageName}
+                                            <option value="all">All</option>
+                                            <option value="published">Published</option>
+                                            <option value="scheduled">Scheduled</option>
+                                            <option value="awaiting_approval">Awaiting approval</option>
+                                            <option value="failed">Failed</option>
+                                        </select>
+                                    </label>
+                                    <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                                        Platform
+                                        <select
+                                            value={historyPlatform}
+                                            onChange={(e) => setHistoryPlatform(e.target.value)}
+                                            className="px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)]"
+                                        >
+                                            <option value="all">All</option>
+                                            <option value="facebook">Facebook</option>
+                                            <option value="instagram">Instagram</option>
+                                            <option value="linkedin">LinkedIn</option>
+                                        </select>
+                                    </label>
+                                    <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                                        Date
+                                        <select
+                                            value={historyRange}
+                                            onChange={(e) => setHistoryRange(e.target.value)}
+                                            className="px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)]"
+                                        >
+                                            <option value="all">All time</option>
+                                            <option value="24h">Last 24 hours</option>
+                                            <option value="7d">Last 7 days</option>
+                                            <option value="30d">Last 30 days</option>
+                                            <option value="90d">Last 90 days</option>
+                                        </select>
+                                    </label>
+                                    <span className="text-[11px] text-[var(--muted-2)]">
+                                        {filteredHistory.length} post{filteredHistory.length === 1 ? '' : 's'}
+                                    </span>
+                                </div>
+
+                                {/* One feed failing must be visible, not silent — this is
+                            how "only Instagram shows up" gets diagnosed. */}
+                                {historyFeedErrors.length > 0 && (
+                                    <div className="flex items-start gap-2.5 rounded-xl border px-4 py-3 mb-4"
+                                        style={{ borderColor: 'rgba(251, 191, 36, 0.4)', background: 'rgba(251, 191, 36, 0.08)' }}>
+                                        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" style={{ color: '#FBBF24' }} />
+                                        <div className="text-[12px] text-[var(--text)] leading-relaxed min-w-0">
+                                            <p className="font-medium mb-0.5">Some feeds could not be read:</p>
+                                            {historyFeedErrors.map((msg, i) => (
+                                                <p key={i} className="text-[var(--muted)] break-words">{msg}</p>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {historyLoading && platformHistory === null ? (
+                                    <div className="py-10 text-center text-sm text-[var(--muted)]">Loading your posts…</div>
+                                ) : allHistoryItems.length === 0 ? (
+                                    <div className="py-10 text-center">
+                                        <Send className="h-8 w-8 mx-auto mb-3 text-[var(--muted-2)]" />
+                                        <p className="text-sm text-[var(--muted)]">
+                                            No posts on your connected accounts yet.
+                                        </p>
+                                    </div>
+                                ) : filteredHistory.length === 0 ? (
+                                    <p className="py-8 text-center text-sm text-[var(--muted)]">
+                                        No posts match these filters.
+                                    </p>
+                                ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                        {filteredHistory.map((it) => {
+                                            const Icon = platformMeta(it.platform).Icon;
+                                            const statusConfig = getStatusConfig(it.status);
+                                            return (
+                                                <div
+                                                    key={it.key}
+                                                    className="flex flex-col gap-3 p-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)]"
+                                                >
+                                                    <div className="flex items-start gap-3">
+                                                        {it.mediaUrl && (
+                                                            <img
+                                                                src={it.mediaUrl}
+                                                                alt=""
+                                                                loading="lazy"
+                                                                className="w-14 h-14 rounded-xl object-cover border border-[var(--border)] shrink-0"
+                                                            />
+                                                        )}
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-sm text-[var(--text)] line-clamp-3 mb-2">
+                                                                {it.message || <span className="text-[var(--muted-2)]">No caption</span>}
+                                                            </p>
+                                                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+                                                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-[var(--accent-muted)] text-[var(--accent)] font-medium">
+                                                                    <Icon className="h-3 w-3" />
+                                                                    {it.pageName}
+                                                                </span>
+                                                                <span>{it.when ? new Date(it.when).toLocaleString() : ''}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {it.status === 'failed' && it.error && (
+                                                        <p className="text-[11px] text-red-500 line-clamp-2">{it.error}</p>
+                                                    )}
+
+                                                    {it.status === 'awaiting_approval' && (
+                                                        <p className="text-[11px] text-[var(--muted)]">
+                                                            Sent to {(it.raw.approver_phones || []).map((p) => `+${p}`).join(', ') || 'no approver'}
+                                                            {it.raw.approval_sent_at
+                                                                ? ` · ${new Date(it.raw.approval_sent_at).toLocaleString()}`
+                                                                : ' · WhatsApp request not delivered yet'}
+                                                        </p>
+                                                    )}
+
+                                                    <div className="flex items-center justify-between gap-2 mt-auto">
+                                                        <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium ${statusConfig.bg} ${statusConfig.color}`}>
+                                                            {statusConfig.label}
                                                         </span>
-                                                        <span>{it.when ? new Date(it.when).toLocaleString() : ''}</span>
+                                                        <div className="flex items-center gap-2 text-[11px]">
+                                                            {it.source === 'live' && it.likes != null && (
+                                                                <span className="text-[var(--muted)]">{it.likes} likes</span>
+                                                            )}
+                                                            {it.source === 'live' && it.platform === 'facebook' && (
+                                                                <button
+                                                                    onClick={() => setCommentsPost(it.raw)}
+                                                                    className="text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                                                                    title="Read, reply to, hide or delete comments as your Page"
+                                                                >
+                                                                    {it.comments ?? 0} comments →
+                                                                </button>
+                                                            )}
+                                                            {it.source === 'live' && it.platform !== 'facebook' && it.comments != null && (
+                                                                <span className="text-[var(--muted)]">{it.comments} comments</span>
+                                                            )}
+                                                            {it.permalink && (
+                                                                <a
+                                                                    href={it.permalink}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    className="text-[var(--accent)] hover:text-[var(--accent-hover)] font-medium"
+                                                                >
+                                                                    View →
+                                                                </a>
+                                                            )}
+
+                                                            {it.source === 'db' && it.status === 'awaiting_approval' && (
+                                                                <>
+                                                                    <button
+                                                                        onClick={() => handleResendApproval(it.raw)}
+                                                                        disabled={approvalBusyId === it.raw.id}
+                                                                        title="Send the WhatsApp approval request again"
+                                                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-[var(--border)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent)] disabled:opacity-50 transition-colors"
+                                                                    >
+                                                                        <MessageCircle className="h-3.5 w-3.5" /> Resend
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleApprovePost(it.raw)}
+                                                                        disabled={approvalBusyId === it.raw.id}
+                                                                        title="Approve from the dashboard without waiting for WhatsApp"
+                                                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] disabled:opacity-50 transition-colors"
+                                                                    >
+                                                                        <Check className="h-3.5 w-3.5" /> Approve
+                                                                    </button>
+                                                                </>
+                                                            )}
+                                                            {it.source === 'db' && (
+                                                                <button
+                                                                    onClick={() => handleDeleteScheduledPost(it.raw)}
+                                                                    title={it.status === 'scheduled' ? 'Cancel this post' : 'Remove from history'}
+                                                                    className="p-1.5 rounded-lg hover:bg-red-100 text-red-500 transition-colors"
+                                                                >
+                                                                    <X className="h-4 w-4" />
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
-
-                                            {it.status === 'failed' && it.error && (
-                                                <p className="text-[11px] text-red-500 line-clamp-2">{it.error}</p>
-                                            )}
-
-                                            {it.status === 'awaiting_approval' && (
-                                                <p className="text-[11px] text-[var(--muted)]">
-                                                    Sent to {(it.raw.approver_phones || []).map((p) => `+${p}`).join(', ') || 'no approver'}
-                                                    {it.raw.approval_sent_at
-                                                        ? ` · ${new Date(it.raw.approval_sent_at).toLocaleString()}`
-                                                        : ' · WhatsApp request not delivered yet'}
-                                                </p>
-                                            )}
-
-                                            <div className="flex items-center justify-between gap-2 mt-auto">
-                                                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium ${statusConfig.bg} ${statusConfig.color}`}>
-                                                    {statusConfig.label}
-                                                </span>
-                                                <div className="flex items-center gap-2 text-[11px]">
-                                                    {it.source === 'live' && it.likes != null && (
-                                                        <span className="text-[var(--muted)]">{it.likes} likes</span>
-                                                    )}
-                                                    {it.source === 'live' && it.platform === 'facebook' && (
-                                                        <button
-                                                            onClick={() => setCommentsPost(it.raw)}
-                                                            className="text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
-                                                            title="Read, reply to, hide or delete comments as your Page"
-                                                        >
-                                                            {it.comments ?? 0} comments →
-                                                        </button>
-                                                    )}
-                                                    {it.source === 'live' && it.platform !== 'facebook' && it.comments != null && (
-                                                        <span className="text-[var(--muted)]">{it.comments} comments</span>
-                                                    )}
-                                                    {it.source === 'live' && it.permalink && (
-                                                        <a
-                                                            href={it.permalink}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="text-[var(--accent)] hover:text-[var(--accent-hover)]"
-                                                        >
-                                                            View →
-                                                        </a>
-                                                    )}
-                                                    {it.source === 'db' && it.status === 'awaiting_approval' && (
-                                                        <>
-                                                            <button
-                                                                onClick={() => handleResendApproval(it.raw)}
-                                                                disabled={approvalBusyId === it.raw.id}
-                                                                title="Send the WhatsApp approval request again"
-                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-[var(--border)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent)] disabled:opacity-50 transition-colors"
-                                                            >
-                                                                <MessageCircle className="h-3.5 w-3.5" /> Resend
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleApprovePost(it.raw)}
-                                                                disabled={approvalBusyId === it.raw.id}
-                                                                title="Approve from the dashboard without waiting for WhatsApp"
-                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] disabled:opacity-50 transition-colors"
-                                                            >
-                                                                <Check className="h-3.5 w-3.5" /> Approve
-                                                            </button>
-                                                        </>
-                                                    )}
-                                                    {it.source === 'db' && (
-                                                        <button
-                                                            onClick={() => handleDeleteScheduledPost(it.raw)}
-                                                            title={it.status === 'scheduled' ? 'Cancel this post' : 'Remove from history'}
-                                                            className="p-1.5 rounded-lg hover:bg-red-100 text-red-500 transition-colors"
-                                                        >
-                                                            <X className="h-4 w-4" />
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
+                                            );
+                                        })}
+                                    </div>
+                                )}
                             </div>
                         )}
-                    </div>
-                )}
 
-                {/* Create a Post tab */}
-                {activeTab === 'create' && (
-                    <CreatePostHub
-                        isConnected={isConnected}
-                        onConnect={() => setActiveTab('profiles')}
-                        onSelect={(mode) => {
-                            if (mode === 'template') {
-                                setOccasionContext(null);
-                                setShowTemplates(true);
-                                return;
-                            }
-                            if (mode === 'bulk') {
-                                setShowBulk(true);
-                                return;
-                            }
-                            setPublishMode(mode);
-                            setScheduleStep(1);
-                            setShowScheduleModal(true);
-                        }}
-                        onPickOccasion={(occasion) => {
-                            // Open the template gallery filtered to this occasion,
-                            // carrying its date so the post pre-schedules to it.
-                            setOccasionContext({
-                                niche: 'occasion',
-                                search: occasion.name,
-                                date: occasion.date,
-                            });
-                            setShowTemplates(true);
-                        }}
-                    />
-                )}
+                        {/* Create a Post tab */}
+                        {activeTab === 'create' && (
+                            <CreatePostHub
+                                isConnected={isConnected}
+                                onConnect={() => setActiveTab('profiles')}
+                                onSelect={(mode) => {
+                                    if (mode === 'pipeline') {
+                                        navigate('/pipelines');
+                                        return;
+                                    }
+                                    if (mode === 'template') {
+                                        setOccasionContext(null);
+                                        setShowTemplates(true);
+                                        return;
+                                    }
+                                    if (mode === 'bulk') {
+                                        setShowBulk(true);
+                                        return;
+                                    }
+                                    setPublishMode(mode);
+                                    setScheduleStep(1);
+                                    setShowScheduleModal(true);
+                                }}
+                                onPickOccasion={(occasion) => {
+                                    // Open the template gallery filtered to this occasion,
+                                    // carrying its date so the post pre-schedules to it.
+                                    setOccasionContext({
+                                        niche: 'occasion',
+                                        search: occasion.name,
+                                        date: occasion.date,
+                                    });
+                                    setShowTemplates(true);
+                                }}
+                            />
+                        )}
 
-                {/* Media Library tab — files stored in the user's paid storage */}
-                {activeTab === 'library' && (
-                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
-                        <div className="flex items-center gap-4 mb-1">
-                            <h2 className="flex-1 text-[15px] font-semibold text-[var(--text)]">Media Library</h2>
-                            <button
-                                onClick={() => navigate('/storage')}
-                                className="text-sm font-medium text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
-                            >
-                                Manage storage →
-                            </button>
-                        </div>
-                        <p className="text-xs text-[var(--muted)] mb-4">
-                            Upload once, reuse in any post — the composer's Library tab pulls from here.
-                        </p>
-                        <MediaLibrary />
-                    </div>
-                )}
+                        {/* Media Library tab — files stored in the user's paid storage */}
+                        {activeTab === 'library' && (
+                            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                                <div className="flex items-center gap-4 mb-1">
+                                    <h2 className="flex-1 text-[15px] font-semibold text-[var(--text)]">Media Library</h2>
+                                    <button
+                                        onClick={() => navigate('/storage')}
+                                        className="text-sm font-medium text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                                    >
+                                        Manage storage →
+                                    </button>
+                                </div>
+                                <p className="text-xs text-[var(--muted)] mb-4">
+                                    Upload once, reuse in any post — the composer's Library tab pulls from here.
+                                </p>
+                                <MediaLibrary />
+                            </div>
+                        )}
 
-                {/* Analytics tab */}
-                {activeTab === 'analytics' && isConnected && (
-                    <AnalyticsPanel
-                        hasMeta={Boolean(connection)}
-                        hasLinkedIn={Boolean(liConnection)}
-                        posts={scheduledPosts}
-                        authHeaders={getAuthHeaders}
-                    />
-                )}
+                        {/* Analytics tab */}
+                        {activeTab === 'analytics' && isConnected && (
+                            <AnalyticsPanel
+                                hasMeta={Boolean(connection)}
+                                hasLinkedIn={Boolean(liConnection)}
+                                posts={scheduledPosts}
+                                authHeaders={getAuthHeaders}
+                            />
+                        )}
 
-            </main>
-            </div>
+                    </main>
+                </div>
 
             </div>{/* end sidebar + content layout */}
 

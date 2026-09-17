@@ -1,5 +1,5 @@
 import React from 'react';
-import { Zap, Images, Clock, ArrowRight, Link2, Sparkles } from 'lucide-react';
+import { Zap, Images, Clock, ArrowRight, Link2, Sparkles, Bot } from 'lucide-react';
 import OccasionStrip from '@/features/occasions/components/OccasionStrip';
 
 /**
@@ -27,6 +27,13 @@ const MODES = [
         available: true,
     },
     {
+        id: 'pipeline',
+        icon: Bot,
+        title: 'AI Content Pipelines',
+        body: 'Automate content generation & daily publishing from AI prompts & queues.',
+        available: true,
+    },
+    {
         id: 'template',
         icon: Sparkles,
         title: 'Create from a Template',
@@ -41,6 +48,7 @@ const MODES = [
         available: true,
     },
 ];
+
 
 const UPCOMING = [];
 

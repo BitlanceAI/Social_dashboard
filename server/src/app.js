@@ -27,6 +27,7 @@ import occasionsRoutes from './modules/occasions/occasions.routes.js';
 import aiRoutes from './modules/ai/ai.routes.js';
 import whatsappRoutes from './modules/whatsapp/whatsapp.routes.js';
 import approvalRoutes from './modules/approvals/approval.routes.js';
+import pipelineRoutes from './modules/pipelines/pipeline.routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -65,6 +66,8 @@ app.use('/api/occasions', occasionsRoutes); // Indian occasion calendar (dates r
 app.use('/api/ai', aiRoutes); // AI copywriting (post captions via Perplexity)
 app.use('/api/whatsapp', whatsappRoutes); // WhatsApp Cloud API webhook (approval button taps) + status
 app.use('/api/approvals', approvalRoutes); // post approval: saved approvers, dashboard approve/reject/resend
+app.use('/api/pipelines', pipelineRoutes); // AI content pipelines & auto-poster workflow
+
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date() });

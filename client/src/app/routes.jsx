@@ -15,6 +15,7 @@ const DataDeletionPage = lazy(() => import('@/features/legal/pages/DataDeletionP
 const AdminPanelPage   = lazy(() => import('@/features/admin/pages/AdminPanelPage'));
 const StoragePage      = lazy(() => import('@/features/storage/pages/StoragePage'));
 const BillingPage      = lazy(() => import('@/features/billing/pages/BillingPage'));
+const PipelinesPage    = lazy(() => import('@/features/pipelines/pages/PipelinesPage'));
 
 const guarded = (element) => <AuthGuard>{element}</AuthGuard>;
 
@@ -31,9 +32,13 @@ export const routes = [
   // (see META_RETURN_PATH in server/src/modules/meta/meta.routes.js)
   { path: '/socialdashboad', element: guarded(<MetaDashboardPage />) },
 
+  // AI Content Automation Pipelines
+  { path: '/pipelines', element: guarded(<PipelinesPage />) },
+
   // Admin panel — the server enforces users.role='admin'; the page renders
   // an access-denied screen for everyone else
   { path: '/admin', element: guarded(<AdminPanelPage />) },
+
 
   // Paid media storage (Razorpay)
   { path: '/storage', element: guarded(<StoragePage />) },
