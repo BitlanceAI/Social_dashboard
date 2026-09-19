@@ -19,7 +19,7 @@ import { authenticateUser } from '../../middleware/auth.js';
 import { resolveWorkspace } from '../../middleware/workspace.js';
 import { encryptData, decryptData } from '../../shared/utils/encryption.js';
 import { uploadPostMedia, postMediaUpload } from '../../shared/storage/postMedia.js';
-import { getEntitlement, dailyPostCapExceeded } from '../billing/billing.service.js';
+import { getEntitlement, dailyPostCapExceeded, billingOwner } from '../billing/billing.service.js';
 import { cleanPhones, isWhatsAppEnabled } from '../whatsapp/whatsapp.service.js';
 import { requestApproval, rememberApprovers } from '../approvals/approval.service.js';
 
@@ -156,7 +156,7 @@ const validateTokenCached = async (connectionId, updatedAt, metaService) => {
  */
 const billingBlocksPublishing = async (req, res) => {
     try {
-        const ent = await getEntitlement(req.user.id);
+        const ent = await getEntitlement(await billingOwner(req.user.id, req.workspaceId));
         if (!ent.active) {
             res.status(402).json({
                 error: 'Your free trial has ended. Subscribe to resume publishing.',
@@ -165,17 +165,18 @@ const billingBlocksPublishing = async (req, res) => {
             return true;
         }
     } catch (e) {
-        console.error('[Meta] billing gate skipped:', e.message);
+        res.status(503).json({ error: 'Unable to verify billing access. Please retry.' });
+        return true;
     }
     return false;
 };
 
 /**
  * Enforce the plan's per-account daily post cap. Returns true (and responds
- * 402) when today's cap for this page is reached. Fails OPEN.
+ * 402) when today's cap for this page is reached.
  */
 const dailyCapBlocks = async (req, res, pageId) => {
-    if (await dailyPostCapExceeded(req.user.id, req.workspaceId, pageId)) {
+    if (await dailyPostCapExceeded(await billingOwner(req.user.id, req.workspaceId), req.workspaceId, pageId)) {
         res.status(402).json({
             error: 'You have reached your plan\'s daily post limit for this account. Upgrade for more.',
             code: 'PLAN_LIMIT',
@@ -371,7 +372,7 @@ router.post('/connect-api-key', async (req, res) => {
                 // Preserve existing WhatsApp config if present
                 whatsapp_phone_id: existingConn?.whatsapp_phone_id || null,
                 waba_id: existingConn?.waba_id || null,
-                selected_page_ids: carriedSelection,
+                selected_page_ids: carriedSelection ?? [],
                 updated_at: new Date().toISOString()
             }, {
                 onConflict: 'workspace_id'
@@ -739,7 +740,7 @@ router.post('/pages/select', async (req, res) => {
                 const sel = (ids || []).map(String);
                 return sel.length + sel.filter((id) => pageById.get(id)?.instagram_business_account).length;
             };
-            const ent = await getEntitlement(req.user.id);
+            const ent = await getEntitlement(await billingOwner(req.user.id, req.workspaceId));
             const limit = ent.limits.accounts;
             if (limit !== null && limit !== undefined) {
                 const projected = ent.usage.accounts
@@ -753,7 +754,7 @@ router.post('/pages/select', async (req, res) => {
                 }
             }
         } catch (e) {
-            console.error('[Meta] account-cap check skipped:', e.message);
+            throw e;
         }
 
         const { error } = await supabase

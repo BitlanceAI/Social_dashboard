@@ -24,9 +24,9 @@ const Cell = ({ value }) => {
 };
 
 const FAQ = [
-    ['Is there a free trial?', 'Yes — every plan starts with a 14-day free trial. No credit card required, and you are never charged automatically.'],
+    ['Is there a free trial?', 'Yes — every plan starts with a 15-day free trial. Payment authorization is required at signup. Your selected plan renews automatically after the trial until you cancel.'],
     ['What counts as a social account?', 'Each connected publishing target: a Facebook Page, a linked Instagram Business account, or a LinkedIn profile. You pick which accounts to use in the dashboard.'],
-    ['Can I change plans later?', 'Yes. Upgrade, downgrade, or cancel any time from your billing settings. Billing is prorated.'],
+    ['Can I change plans later?', 'Yes. Upgrade, downgrade, or cancel any time from your billing settings. Cancel your existing subscription before choosing a different plan.'],
     ['How does yearly billing work?', 'Pay for ten months and get two free — roughly 17% off the monthly rate. Yearly plans are billed once per year.'],
     ['Do you charge per team member?', 'No. Plans are priced per social account, not per seat — each tier includes its users. Extra teammates are a small flat add-on.'],
     ['Is media storage included?', 'Each plan includes working storage for your posts. If you need more, storage scales as a separate add-on, billed only for what you use.'],
@@ -39,7 +39,7 @@ const PricingPage = () => {
     const { theme, toggleTheme } = useTheme();
     const [interval, setInterval] = useState('yearly'); // default to the discounted option
     const [plans, setPlans] = useState([]);
-    const [trialDays, setTrialDays] = useState(14);
+    const [trialDays, setTrialDays] = useState(15);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -48,14 +48,14 @@ const PricingPage = () => {
             .then((res) => {
                 if (cancelled) return;
                 setPlans(res.plans || []);
-                setTrialDays(res.trialDays || 14);
+                setTrialDays(res.trialDays || 15);
             })
             .catch(() => { /* pricing shows a fallback message */ })
             .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
     }, []);
 
-    const dest = user ? '/billing' : '/login';
+    const dest = user ? '/billing' : '/signup';
     const ctaLabel = user ? 'Go to billing' : 'Start free trial';
     const priceOf = (p) => (interval === 'yearly' ? p.yearlyPrice : p.monthlyPrice);
     const perLabel = interval === 'yearly' ? '/ year' : '/ month';
@@ -64,7 +64,7 @@ const PricingPage = () => {
         <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
             <SEOHead
                 title="Pricing"
-                description="Simple, per-account pricing for scheduling and publishing to Facebook, Instagram, and LinkedIn. 14-day free trial, no credit card."
+                description="Simple, per-account pricing for scheduling and publishing to Facebook, Instagram, and LinkedIn. 15-day free trial, payment authorization at signup."
                 canonicalUrl="https://www.bitlancetechhub.com/pricing"
             />
 
@@ -97,7 +97,7 @@ const PricingPage = () => {
                     </h1>
                     <p className="text-[var(--muted)] text-lg sm:text-xl font-medium leading-relaxed max-w-2xl mx-auto mb-8">
                         Schedule and publish to Facebook, Instagram, and LinkedIn from one dashboard.
-                        Start with a {trialDays}-day free trial — no credit card, cancel anytime.
+                        Start with a {trialDays}-day free trial — authorize payment at signup, cancel before renewal.
                     </p>
 
                     {/* Billing interval toggle */}
@@ -163,6 +163,9 @@ const PricingPage = () => {
                                             <Check className="h-4 w-4 shrink-0 mt-0.5 text-[var(--accent)]" />
                                             <span><strong>{unlimited(p.includedWorkspaces)}</strong> {p.includedWorkspaces === 1 ? 'workspace' : 'workspaces'}</span>
                                         </li>
+                                        {p.generationLimit != null && <li className="text-sm">{p.generationLimit} AI generations per month</li>}
+                                        {p.trialAutoPostLimit != null && <li className="text-sm">{p.trialAutoPostLimit} automatic posts during the trial</li>}
+                                        <li className="text-sm">{p.trialDays}-day trial</li>
                                         {p.features.map((f) => (
                                             <li key={f} className="flex items-start gap-2 text-sm text-[var(--muted)]">
                                                 <Check className="h-4 w-4 shrink-0 mt-0.5 text-[var(--accent)]" />
@@ -260,7 +263,7 @@ const PricingPage = () => {
                 <section className="py-16">
                     <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center">
                         <h2 className="font-['Space_Grotesk'] text-3xl sm:text-4xl font-black tracking-tight mb-3">Start your {trialDays}-day free trial</h2>
-                        <p className="text-sm text-[var(--muted)] mb-6">No credit card. Cancel anytime. 30-day money-back guarantee.</p>
+                        <p className="text-sm text-[var(--muted)] mb-6">Payment authorization required. Automatic billing after your trial. Cancel before renewal.</p>
                         <Link to={dest} className={CTA_CLASS}>
                             {ctaLabel}
                             <ArrowRight className="w-4 h-4" />

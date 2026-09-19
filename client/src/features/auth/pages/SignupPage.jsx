@@ -65,7 +65,7 @@ const SignupPage = () => {
         }
 
         try {
-            const { error } = await signUp({
+            const { data, error } = await signUp({
                 email: formData.email,
                 password: formData.password,
                 options: {
@@ -98,7 +98,9 @@ const SignupPage = () => {
 
             // Email confirmation is disabled for this project, so the account
             // is usable immediately — no "check your inbox" theater.
-            setSuccess('Account created! You can log in now.');
+            setSuccess('Account created. Complete payment authorization to start your trial.');
+            if (data?.session) navigate('/billing');
+            else setSuccess('Check your email to confirm your account, then sign in to complete payment setup.');
 
             if (formData.phone) {
                 setTimeout(() => {

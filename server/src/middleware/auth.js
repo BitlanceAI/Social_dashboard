@@ -1,3 +1,6 @@
+import { ensureSubscription, billingOwner } from '../modules/billing/billing.service.js';
+import { subscriptionAccess } from '../modules/billing/billing.policy.js';
+import { supabaseAdmin } from '../config/supabase.js';
 import { supabase } from '../config/supabase.js';
 
 export const authenticateUser = async (req, res, next) => {
@@ -42,6 +45,20 @@ export const authenticateUser = async (req, res, next) => {
         }
 
         req.workspaceId = rawWsId || null;
+        const exempt = ['/api/billing', '/api/admin', '/api/auth', '/api/profiles'];
+        if (!exempt.some(path => req.baseUrl === path)) {
+            if (rawWsId) {
+                const { data: member, error: memberError } = await supabaseAdmin.from('workspace_members')
+                    .select('user_id').eq('workspace_id', rawWsId).eq('user_id', user.id).maybeSingle();
+                if (memberError) throw memberError;
+                if (!member) return res.status(403).json({ error: 'Workspace access denied' });
+            }
+            const ownerId = await billingOwner(user.id, rawWsId);
+            const sub = await ensureSubscription(ownerId);
+            if (!subscriptionAccess(sub).active) {
+                return res.status(402).json({ success: false, code: 'BILLING_INACTIVE', error: 'Complete payment setup or renew your plan in Billing to continue.' });
+            }
+        }
         next();
     } catch (error) {
         console.error('Auth Middleware Error:', error);

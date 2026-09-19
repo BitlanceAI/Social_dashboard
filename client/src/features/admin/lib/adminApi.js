@@ -99,3 +99,6 @@ export const saveOccasionDate = (slug, year, { date, name, notes }) =>
     request(`/occasions/${slug}/${year}`, { method: 'PUT', body: { date, name, notes } });
 export const deleteOccasionDate = (slug, year) =>
     request(`/occasions/${slug}/${year}`, { method: 'DELETE' });
+
+export const markManualPayment = (subscriptionId, body) =>
+    request(`/subscriptions/${subscriptionId}/manual-payment`, { method: 'POST', body });

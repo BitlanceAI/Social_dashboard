@@ -1,3 +1,5 @@
+import { validateManualPayment } from './manual-payment.js';
+import { subscriptionAccess } from '../billing/billing.policy.js';
 import { supabaseAdmin } from '../../config/supabase.js';
 import * as storageService from '../storage/storage.service.js';
 
@@ -603,9 +605,19 @@ export const updateAdminPlan = async (req, res) => {
     try {
         const patch = { updated_at: new Date().toISOString() };
         const b = req.body || {};
-        const intFields = ['monthly_price', 'yearly_price', 'included_accounts', 'included_users', 'included_workspaces', 'daily_post_limit', 'sort_order'];
+        const intFields = ['monthly_price', 'yearly_price', 'included_accounts', 'included_users', 'included_workspaces', 'daily_post_limit', 'sort_order', 'generation_limit', 'trial_auto_post_limit', 'trial_days'];
         for (const f of intFields) {
-            if (b[f] !== undefined) patch[f] = b[f] === null ? null : parseInt(b[f], 10);
+            if (b[f] === undefined) continue;
+            const nullable = ['included_accounts', 'included_users', 'included_workspaces', 'daily_post_limit', 'generation_limit', 'trial_auto_post_limit'].includes(f);
+            if (b[f] === null && nullable) { patch[f] = null; continue; }
+            if (!Number.isSafeInteger(b[f]) || b[f] < 0 || (f === 'trial_days' && (b[f] < 1 || b[f] > 90))) {
+                return res.status(400).json({ success: false, error: `Invalid ${f}` });
+            }
+            patch[f] = b[f];
+        }
+        if (b.mandate_required !== undefined) {
+            if (typeof b.mandate_required !== 'boolean') return res.status(400).json({ error: 'mandate_required must be a boolean' });
+            patch.mandate_required = b.mandate_required;
         }
         if (b.name !== undefined) patch.name = String(b.name);
         if (b.tagline !== undefined) patch.tagline = String(b.tagline);
@@ -634,7 +646,7 @@ export const getAdminSubscriptions = async (req, res) => {
     try {
         const { data, error } = await supabaseAdmin
             .from('subscriptions')
-            .select('id, user_id, plan_key, interval, status, trial_ends_at, current_period_end, created_at')
+            .select('id, user_id, plan_key, interval, status, trial_ends_at, current_period_end, manual_paid_until, razorpay_subscription_id, created_at')
             .order('created_at', { ascending: false })
             .limit(100);
         if (error) throw error;
@@ -644,6 +656,7 @@ export const getAdminSubscriptions = async (req, res) => {
             success: true,
             subscriptions: (data || []).map((s) => ({
                 ...s,
+                status: subscriptionAccess(s).manualPaid ? 'active' : s.status,
                 userName: userMap[s.user_id]?.name || 'Unknown',
                 userEmail: userMap[s.user_id]?.email || null,
             })),
@@ -651,5 +664,20 @@ export const getAdminSubscriptions = async (req, res) => {
     } catch (err) {
         console.error('[admin] subscriptions failed:', err);
         res.status(500).json({ success: false, error: 'Failed to load subscriptions' });
+    }
+};
+
+
+export const markManualPayment = async (req, res) => {
+    try {
+        const args = validateManualPayment(req.body || {});
+        const { data, error } = await supabaseAdmin.rpc('record_manual_subscription_payment', {
+            ...args, p_subscription: req.params.subscriptionId, p_admin: req.user.id,
+        });
+        if (error) throw error;
+        res.json({ success: true, paymentId: data });
+    } catch (error) {
+        console.error('[admin] Manual payment failed:', error.message);
+        res.status(error.status || 500).json({ error: error.status ? error.message : 'Could not record payment. Refresh and retry with the same payment details.' });
     }
 };

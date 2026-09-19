@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fetchAdminPlans, updateAdminPlan, fetchAdminSubscriptions } from '../lib/adminApi';
 import StatusChip from './StatusChip';
+import ManualPaymentForm from './ManualPaymentForm';
 
 const inputClass =
     'w-full px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)] outline-none focus:border-[var(--accent)] transition-colors';
@@ -19,6 +20,7 @@ const PlansPanel = () => {
     const [loading, setLoading] = useState(true);
     const [savingKey, setSavingKey] = useState(null);
     const [edits, setEdits] = useState({}); // planKey -> partial patch
+    const [manualSubscription, setManualSubscription] = useState(null);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -94,12 +96,12 @@ const PlansPanel = () => {
                                         onChange={(ev) => setField(p.plan_key, 'yearly_rupees', ev.target.value)} />
                                 </label>
                                 <div className="grid grid-cols-2 gap-2">
-                                    {[['included_accounts', 'Accounts'], ['included_users', 'Users'], ['included_workspaces', 'Workspaces'], ['daily_post_limit', 'Daily posts']].map(([f, label]) => (
+                                    {[['included_accounts', 'Accounts'], ['included_users', 'Users'], ['included_workspaces', 'Workspaces'], ['daily_post_limit', 'Daily posts'], ['generation_limit', 'AI generations / month'], ['trial_auto_post_limit', 'Auto posts / trial'], ['trial_days', 'Trial days (1-90)']].map(([f, label]) => (
                                         <label key={f} className="block">
                                             <span className="block text-[10px] font-mono uppercase tracking-widest text-[var(--muted)] mb-1">{label}</span>
-                                            <input type="number" min="0" className={inputClass} placeholder="∞"
+                                            <input type="number" min={f === 'trial_days' ? 1 : 0} max={f === 'trial_days' ? 90 : undefined} step="1" className={inputClass} placeholder={f === 'trial_days' ? '15' : 'Unlimited'}
                                                 defaultValue={p[f] ?? ''}
-                                                onChange={(ev) => setField(p.plan_key, f, ev.target.value === '' ? null : parseInt(ev.target.value, 10))} />
+                                                onChange={(ev) => setField(p.plan_key, f, ev.target.value === '' ? null : Number(ev.target.value))} />
                                         </label>
                                     ))}
                                 </div>
@@ -113,6 +115,12 @@ const PlansPanel = () => {
                                     <input className={inputClass} placeholder="plan_..." defaultValue={p.razorpay_plan_id_yearly || ''}
                                         onChange={(ev) => setField(p.plan_key, 'razorpay_plan_id_yearly', ev.target.value)} />
                                 </label>
+                                <label className="flex items-center gap-2 text-[13px] text-[var(--muted)]">
+                                    <input type="checkbox" checked={edits[p.plan_key]?.mandate_required ?? p.mandate_required}
+                                        onChange={(ev) => setField(p.plan_key, 'mandate_required', ev.target.checked)} />
+                                    Require payment authorization at signup
+                                </label>
+                                <p className="text-xs text-[var(--muted)]">Trial settings apply to new checkouts. Limits apply immediately. Match Razorpay plan prices before enabling checkout.</p>
                                 <label className="flex items-center gap-2 text-[13px] text-[var(--muted)]">
                                     <input type="checkbox" defaultChecked={p.is_active}
                                         onChange={(ev) => setField(p.plan_key, 'is_active', ev.target.checked)} />
@@ -132,13 +140,17 @@ const PlansPanel = () => {
             </div>
 
             {/* Subscriptions */}
+            {manualSubscription && <ManualPaymentForm key={manualSubscription.id}
+                subscription={manualSubscription} plan={plans.find(p => p.plan_key === manualSubscription.plan_key)}
+                onClose={() => setManualSubscription(null)}
+                onSaved={() => { setManualSubscription(null); load(); }} />}
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
                 <h2 className="text-[15px] font-semibold px-5 pt-5 pb-3">Subscriptions</h2>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
                         <thead>
                             <tr className="bg-[var(--surface-2)]">
-                                {['User', 'Plan', 'Interval', 'Renews / trial ends', 'Status'].map((h) => (
+                                {['User', 'Plan', 'Interval', 'Renews / trial ends', 'Status', 'Manual payment'].map((h) => (
                                     <th key={h} className="px-5 py-2.5 text-[10px] font-mono font-normal uppercase tracking-widest text-[var(--muted)] whitespace-nowrap">{h}</th>
                                 ))}
                             </tr>
@@ -154,10 +166,14 @@ const PlansPanel = () => {
                                     <td className="px-5 py-3 text-xs font-mono text-[var(--muted)]">{s.interval}</td>
                                     <td className="px-5 py-3 text-xs font-mono text-[var(--muted)] whitespace-nowrap">{fmtDate(s.current_period_end || s.trial_ends_at)}</td>
                                     <td className="px-5 py-3"><StatusChip status={SUB_STATUS[s.status] || 'no-connection'} label={s.status} /></td>
+                                    <td className="px-5 py-3">
+                                        {s.manual_paid_until && <span className="block text-xs text-[var(--muted)] mb-2">Manually paid through {fmtDate(s.manual_paid_until)}</span>}
+                                        <button className="text-sm text-[var(--accent)] whitespace-nowrap" onClick={() => setManualSubscription(s)}>Mark payment received</button>
+                                    </td>
                                 </tr>
                             ))}
                             {!loading && subs.length === 0 && (
-                                <tr className="border-t border-[var(--border)]"><td colSpan={5} className="px-5 py-8 text-center text-sm text-[var(--muted)]">No subscriptions yet.</td></tr>
+                                <tr className="border-t border-[var(--border)]"><td colSpan={6} className="px-5 py-8 text-center text-sm text-[var(--muted)]">No subscriptions yet.</td></tr>
                             )}
                         </tbody>
                     </table>

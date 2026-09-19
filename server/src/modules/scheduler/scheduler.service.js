@@ -1,3 +1,5 @@
+import { billingOwner, ensureSubscription } from '../billing/billing.service.js';
+import { subscriptionAccess } from '../billing/billing.policy.js';
 /**
  * Post Scheduler
  *
@@ -450,6 +452,8 @@ const sweepExpiringLinkedInTokens = async () => {
 };
 
 const publishScheduledPost = async (post) => {
+    const ownerId = await billingOwner(post.user_id, post.workspace_id);
+    if (!subscriptionAccess(await ensureSubscription(ownerId)).active) return;
     const platforms = (post.platforms && post.platforms.length) ? post.platforms : ['facebook'];
     console.log(`[Scheduler] Publishing post ${post.id} to ${platforms.join(', ')} on page ${post.page_name}...`);
 

@@ -5,7 +5,7 @@ import {
     getOverview, getUsers, createUser, getConnections,
     getStorageSettings, updateStorageSettings, getStoragePurchases,
     getPosts, getPushTokens, getHealth, notifyUser,
-    getAdminPlans, updateAdminPlan, getAdminSubscriptions,
+    getAdminPlans, updateAdminPlan, getAdminSubscriptions, markManualPayment,
 } from './admin.controller.js';
 import {
     adminGetCalendar, adminSetDate, adminRemoveDate,
@@ -30,6 +30,7 @@ router.post('/notify-user', notifyUser);
 router.get('/plans', getAdminPlans);
 router.put('/plans/:planKey', updateAdminPlan);
 router.get('/subscriptions', getAdminSubscriptions);
+router.post('/subscriptions/:subscriptionId/manual-payment', markManualPayment);
 router.get('/occasions', adminGetCalendar);
 router.put('/occasions/:slug/:year', adminSetDate);
 router.delete('/occasions/:slug/:year', adminRemoveDate);

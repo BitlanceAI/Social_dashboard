@@ -108,7 +108,7 @@ export const createWorkspace = async (req, res) => {
         if (!name) return res.status(400).json({ error: 'A workspace name is required' });
 
         // Plan cap: the owner's plan limits how many workspaces they can run.
-        // Fail-open inside wouldExceed, so a billing outage never blocks this.
+        // The database also enforces capacity against concurrent creations.
         if (await wouldExceed(req.user.id, 'workspaces', 1)) {
             return res.status(402).json({
                 error: 'Your plan\'s workspace limit is reached. Upgrade to add more.',

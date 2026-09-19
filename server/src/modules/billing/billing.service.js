@@ -10,12 +10,14 @@
 import '../../config/env.js';
 
 import crypto from 'crypto';
+import { isBillingExempt } from './billing-exemption.js';
+import { billingError, subscriptionAccess, providerPatch, generationPeriod } from './billing.policy.js';
 import { supabaseAdmin } from '../../config/supabase.js';
 
 const RAZORPAY_API = 'https://api.razorpay.com/v1';
-const TRIAL_DAYS = 14;
+const TRIAL_DAYS = 15;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const DEFAULT_TRIAL_PLAN = 'growth'; // trial gives the mid tier's allowances
+const DEFAULT_TRIAL_PLAN = 'solo';
 
 const razorpayAuth = () => {
     const keyId = process.env.RAZORPAY_KEY_ID;
@@ -24,7 +26,7 @@ const razorpayAuth = () => {
     return { keyId, keySecret, header: 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64') };
 };
 
-export const isConfigured = () => Boolean(razorpayAuth());
+export const isConfigured = () => Boolean(razorpayAuth() && process.env.RAZORPAY_WEBHOOK_SECRET);
 
 // ── Plan catalog ─────────────────────────────────────────────────────────────
 
@@ -39,6 +41,10 @@ const publicPlan = (p) => ({
     includedUsers: p.included_users,
     includedWorkspaces: p.included_workspaces,
     dailyPostLimit: p.daily_post_limit,
+    generationLimit: p.generation_limit,
+    trialAutoPostLimit: p.trial_auto_post_limit,
+    trialDays: p.trial_days,
+    mandateRequired: p.mandate_required,
     features: Array.isArray(p.features) ? p.features : [],
     highlighted: p.highlighted,
     monthlyPurchasable: Boolean(p.razorpay_plan_id_monthly),
@@ -55,7 +61,7 @@ export const getPlans = async () => {
     return {
         plans: (data || []).map(publicPlan),
         paymentsEnabled: isConfigured(),
-        trialDays: TRIAL_DAYS,
+        trialDays: data?.find(p => p.plan_key === DEFAULT_TRIAL_PLAN)?.trial_days ?? TRIAL_DAYS,
     };
 };
 
@@ -75,16 +81,19 @@ const getPlanRow = async (planKey) => {
 
 // ── Subscription lifecycle ───────────────────────────────────────────────────
 
-/** The user's subscription row, creating a 14-day trial the first time. */
+/** New accounts wait for payment setup; existing subscriptions retain their state. */
 export const ensureSubscription = async (userId) => {
-    const { data: existing } = await supabaseAdmin
+    if (await isBillingExempt(userId)) return { user_id: userId, billing_exempt: true, status: 'active' };
+    const { data: existing, error: lookupError } = await supabaseAdmin
         .from('subscriptions')
         .select('*')
         .eq('user_id', userId)
         .maybeSingle();
+    if (lookupError) throw lookupError;
     if (existing) return existing;
 
-    const trialEnds = new Date(Date.now() + TRIAL_DAYS * DAY_MS).toISOString();
+    const plan = await getPlanRow(DEFAULT_TRIAL_PLAN);
+    const trialEnds = plan.mandate_required ? null : new Date(Date.now() + plan.trial_days * DAY_MS).toISOString();
     const { data, error } = await supabaseAdmin
         .from('subscriptions')
         .insert({
@@ -92,6 +101,7 @@ export const ensureSubscription = async (userId) => {
             plan_key: DEFAULT_TRIAL_PLAN,
             interval: 'monthly',
             status: 'trialing',
+            mandate_required: plan.mandate_required,
             trial_ends_at: trialEnds,
             current_period_end: trialEnds,
         })
@@ -110,8 +120,9 @@ export const ensureSubscription = async (userId) => {
 /** Connected accounts / workspaces / teammates the user is currently using. */
 const getUsage = async (userId) => {
     // Workspaces the user owns; the subscription covers these.
-    const { data: workspaces } = await supabaseAdmin
+    const { data: workspaces, error: workspaceError } = await supabaseAdmin
         .from('workspaces').select('id').eq('owner_id', userId);
+    if (workspaceError) throw workspaceError;
     const wsIds = (workspaces || []).map((w) => w.id);
     const workspaceCount = wsIds.length;
 
@@ -125,6 +136,8 @@ const getUsage = async (userId) => {
         supabaseAdmin.from('workspace_members')
             .select('user_id').in('workspace_id', wsIds),
     ]);
+
+    for (const result of [metaRes, liRes, memberRes]) if (result.error) throw result.error;
 
     // A "social account" = each selected Facebook Page, plus its linked
     // Instagram, plus each LinkedIn connection — mirrors the dashboard targets.
@@ -151,26 +164,36 @@ const getUsage = async (userId) => {
  */
 export const getEntitlement = async (userId) => {
     const sub = await ensureSubscription(userId);
+    if (sub.billing_exempt) return {
+        ...subscriptionAccess(sub), planKey: 'admin', planName: 'Admin — unrestricted', status: 'active', interval: 'monthly',
+        trialEndsAt: null, currentPeriodEnd: null, mandateAuthorized: false, hasSubscription: false,
+        limits: { accounts: null, users: null, workspaces: null, dailyPosts: null, generations: null, trialAutoPosts: null },
+        usage: { ...(await getUsage(userId)), generations: 0, trialAutoPosts: 0 },
+        extraAccounts: 0, extraUsers: 0, paymentsEnabled: isConfigured(),
+    };
     const plan = await getPlanRow(sub.plan_key);
     const usage = await getUsage(userId);
 
-    const now = Date.now();
-    const trialEnds = sub.trial_ends_at ? new Date(sub.trial_ends_at).getTime() : null;
-    const trialActive = sub.status === 'trialing' && trialEnds && trialEnds > now;
-    const trialExpired = sub.status === 'trialing' && trialEnds && trialEnds <= now;
-
-    // A billing-usable state: paid-active or still inside the trial window.
-    const active = sub.status === 'active' || trialActive;
+    const access = subscriptionAccess(sub);
+    const period = generationPeriod(sub);
+    const { data: counts, error: usageError } = await supabaseAdmin.from('subscription_usage')
+        .select('kind, period_key, used').eq('user_id', userId)
+        .in('period_key', [period, `trial:${sub.id}`]);
+    if (usageError) throw usageError;
+    usage.generations = counts?.find(r => r.kind === 'generations' && r.period_key === period)?.used || 0;
+    usage.trialAutoPosts = counts?.find(r => r.kind === 'trial_auto_posts')?.used || 0;
 
     const cap = (base) => (base === null || base === undefined ? null : base);
     return {
         planKey: sub.plan_key,
         planName: plan.name,
         interval: sub.interval,
-        status: sub.status,
-        active,
-        trialActive,
-        trialExpired,
+        status: access.manualPaid ? 'active' : sub.status,
+        manualPaidUntil: sub.manual_paid_until,
+        ...access,
+        mandateAuthorized: Boolean(sub.mandate_authorized_at),
+        cancelAtPeriodEnd: sub.cancel_at_period_end,
+        hasSubscription: Boolean(sub.razorpay_subscription_id),
         trialEndsAt: sub.trial_ends_at,
         currentPeriodEnd: sub.current_period_end,
         limits: {
@@ -178,6 +201,8 @@ export const getEntitlement = async (userId) => {
             users: cap(plan.included_users) === null ? null : plan.included_users + sub.extra_users,
             workspaces: cap(plan.included_workspaces),
             dailyPosts: cap(plan.daily_post_limit),
+            generations: cap(plan.generation_limit),
+            trialAutoPosts: cap(plan.trial_auto_post_limit),
         },
         usage,
         extraAccounts: sub.extra_accounts,
@@ -188,24 +213,24 @@ export const getEntitlement = async (userId) => {
 
 /** True when adding `add` more of `kind` would exceed the plan (null = unlimited). */
 export const wouldExceed = async (userId, kind, add = 1) => {
+    if (await isBillingExempt(userId)) return false;
     try {
         const ent = await getEntitlement(userId);
         const limit = ent.limits[kind];
         if (limit === null || limit === undefined) return false; // unlimited
         return ent.usage[kind] + add > limit;
     } catch (err) {
-        // Fail OPEN: a billing lookup failure must never block core actions.
-        console.error('[billing] wouldExceed check failed, allowing:', err.message);
-        return false;
+        throw err;
     }
 };
 
 /**
  * Would publishing/scheduling one more post today exceed the plan's per-account
  * daily cap? Counts today's posts (published + still-pending) for this page in
- * the workspace. Fails OPEN. `dailyPostLimit` NULL = unlimited.
+ * the workspace. Lookup errors block the operation. `dailyPostLimit` NULL = unlimited.
  */
 export const dailyPostCapExceeded = async (userId, workspaceId, pageId) => {
+    if (await isBillingExempt(userId)) return false;
     try {
         const ent = await getEntitlement(userId);
         const limit = ent.limits.dailyPosts;
@@ -225,159 +250,177 @@ export const dailyPostCapExceeded = async (userId, workspaceId, pageId) => {
 
         return (count ?? 0) + 1 > limit;
     } catch (err) {
-        console.error('[billing] daily-post cap check skipped:', err.message);
-        return false;
+        throw err;
     }
 };
 
-/** Create a Razorpay subscription for a plan+interval and store it as pending. */
-export const createSubscription = async (userId, planKey, interval) => {
+
+// Provider responses, not checkout callbacks, determine billing state.
+const providerRequest = async (path, body) => {
     const auth = razorpayAuth();
-    if (!auth) {
-        const err = new Error('Payments are not configured');
-        err.status = 503;
-        throw err;
-    }
-    const plan = await getPlanRow(planKey);
-    const razorpayPlanId = interval === 'yearly' ? plan.razorpay_plan_id_yearly : plan.razorpay_plan_id_monthly;
-    if (!razorpayPlanId) {
-        const err = new Error(`This plan is not available for ${interval} checkout yet`);
-        err.status = 503;
-        throw err;
-    }
-
-    // total_count: how many billing cycles before Razorpay stops. Long horizon.
-    const totalCount = interval === 'yearly' ? 10 : 120;
-    const res = await fetch(`${RAZORPAY_API}/subscriptions`, {
-        method: 'POST',
+    if (!auth) throw billingError('Payments are not configured', 503);
+    const response = await fetch(`${RAZORPAY_API}${path}`, {
+        method: body ? 'POST' : 'GET',
         headers: { Authorization: auth.header, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            plan_id: razorpayPlanId,
-            total_count: totalCount,
-            customer_notify: 1,
-            notes: { user_id: userId, plan_key: planKey, interval },
-        }),
+        ...(body ? { body: JSON.stringify(body) } : {}),
+        signal: AbortSignal.timeout(20000),
     });
-    const subscription = await res.json();
-    if (!res.ok) {
-        console.error('[billing] razorpay subscription failed:', subscription);
-        const err = new Error(subscription?.error?.description || 'Could not start the subscription');
-        err.status = 502;
-        throw err;
-    }
-
-    await supabaseAdmin
-        .from('subscriptions')
-        .upsert({
-            user_id: userId,
-            plan_key: planKey,
-            interval,
-            status: 'past_due', // pending activation until the first charge verifies
-            razorpay_subscription_id: subscription.id,
-            updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' });
-
-    return {
-        subscriptionId: subscription.id,
-        keyId: auth.keyId,
-        planName: plan.name,
-    };
+    const result = await response.json();
+    if (!response.ok) throw billingError(result?.error?.description || 'Payment provider unavailable', 502);
+    return result;
 };
 
-/** Verify the checkout signature and activate the subscription. */
+const saveSubscription = async (userId, patch, providerId) => {
+    let query = supabaseAdmin.from('subscriptions').update(patch).eq('user_id', userId);
+    if (providerId) query = query.eq('razorpay_subscription_id', providerId);
+    const { data, error } = await query.select('*').single();
+    if (error) throw error;
+    return data;
+};
+
+export const createSubscription = async (userId, planKey, interval) => {
+    if (await isBillingExempt(userId)) throw billingError('This admin account has unrestricted access and does not need a subscription', 400);
+    if (!['monthly', 'yearly'].includes(interval)) throw billingError('Choose monthly or yearly billing', 400);
+    const plan = await getPlanRow(planKey);
+    if (!plan.is_active) throw billingError('This plan is not available', 400);
+    const planId = interval === 'yearly' ? plan.razorpay_plan_id_yearly : plan.razorpay_plan_id_monthly;
+    if (!planId) throw billingError('This billing option is not configured yet', 503);
+    const auth = razorpayAuth();
+    if (!auth || !isConfigured()) throw billingError('Payments are not configured', 503);
+    const sub = await ensureSubscription(userId);
+    if (sub.razorpay_subscription_id) {
+        const remote = await providerRequest(`/subscriptions/${sub.razorpay_subscription_id}`);
+        if (['created', 'authenticated', 'active', 'pending', 'halted'].includes(remote.status)) {
+            if (sub.plan_key === planKey && sub.interval === interval && remote.status === 'created') {
+                return { subscriptionId: remote.id, keyId: auth.keyId, planName: plan.name, trialEndsAt: sub.trial_ends_at };
+            }
+            throw billingError('Cancel your existing subscription before starting a different one', 409);
+        }
+    }
+    // Validate provider pricing before accepting consent to the catalog price.
+    const remotePlan = await providerRequest(`/plans/${planId}`);
+    const price = interval === 'yearly' ? plan.yearly_price : plan.monthly_price;
+    if (remotePlan.item?.amount !== price || remotePlan.item?.currency !== plan.currency || remotePlan.period !== interval || remotePlan.interval !== 1) {
+        throw billingError('The payment plan does not match the displayed price. Contact support.', 503);
+    }
+    // Claim the checkout so concurrent requests cannot create duplicate mandates.
+    const { data: claimed, error: claimError } = await supabaseAdmin.from('subscriptions')
+        .update({ checkout_started_at: new Date().toISOString() }).eq('user_id', userId)
+        .is('checkout_started_at', null).select('id').maybeSingle();
+    if (claimError) throw claimError;
+    if (!claimed) throw billingError('Checkout is already being prepared. Please contact support if it does not complete.', 409);
+    const trialEndsAt = sub.trial_ends_at || (!sub.mandate_authorized_at && sub.status === 'trialing'
+        ? new Date(Date.now() + plan.trial_days * DAY_MS).toISOString() : null);
+    const futureTrial = Date.parse(trialEndsAt) > Date.now();
+    // Keep the checkout claim on uncertain network failures: retrying blindly can double bill.
+    const remote = await providerRequest('/subscriptions', {
+        plan_id: planId, total_count: interval === 'yearly' ? 10 : 120, customer_notify: 1,
+        ...(futureTrial ? { start_at: Math.floor(Date.parse(trialEndsAt) / 1000) } : {}),
+        notes: { user_id: userId, plan_key: planKey, interval },
+    });
+    await saveSubscription(userId, {
+        plan_key: planKey, interval, status: futureTrial ? 'trialing' : 'past_due',
+        trial_ends_at: trialEndsAt, current_period_end: futureTrial ? trialEndsAt : null,
+        mandate_required: plan.mandate_required, mandate_authorized_at: null,
+        razorpay_subscription_id: remote.id, checkout_started_at: null,
+        cancel_at_period_end: false, recurring_consent_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    });
+    return { subscriptionId: remote.id, keyId: auth.keyId, planName: plan.name, trialEndsAt };
+};
+
 export const verifySubscription = async (userId, { paymentId, subscriptionId, signature }) => {
     const auth = razorpayAuth();
-    if (!auth) {
-        const err = new Error('Payments are not configured');
-        err.status = 503;
-        throw err;
+    if (!auth) throw billingError('Payments are not configured', 503);
+    const sub = await ensureSubscription(userId);
+    if (sub.razorpay_subscription_id !== subscriptionId) throw billingError('Subscription does not belong to this account', 403);
+    const expected = crypto.createHmac('sha256', auth.keySecret).update(`${paymentId}|${subscriptionId}`).digest('hex');
+    if (!/^[a-f0-9]{64}$/i.test(signature) || !crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(signature, 'hex'))) {
+        throw billingError('Payment signature did not verify', 400);
     }
-    // For subscriptions the signed payload is payment_id|subscription_id.
-    const expected = crypto
-        .createHmac('sha256', auth.keySecret)
-        .update(`${paymentId}|${subscriptionId}`)
-        .digest('hex');
-    const valid =
-        expected.length === String(signature).length &&
-        crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(String(signature)));
-    if (!valid) {
-        const err = new Error('Payment signature did not verify');
-        err.status = 400;
-        throw err;
-    }
-
-    const { error } = await supabaseAdmin
-        .from('subscriptions')
-        .update({ status: 'active', updated_at: new Date().toISOString() })
-        .eq('user_id', userId)
-        .eq('razorpay_subscription_id', subscriptionId);
-    if (error) throw error;
-    return { active: true };
+    const remote = await providerRequest(`/subscriptions/${subscriptionId}`);
+    if (!['authenticated', 'active'].includes(remote.status)) throw billingError('Payment authorization is still pending', 409);
+    const updated = await saveSubscription(userId, providerPatch(remote, sub), subscriptionId);
+    return subscriptionAccess(updated);
 };
 
-/** Cancel: keep access until the period ends (Razorpay cancel_at_cycle_end). */
 export const cancelSubscription = async (userId) => {
     const sub = await ensureSubscription(userId);
-    if (!sub.razorpay_subscription_id) {
-        const err = new Error('No active subscription to cancel');
-        err.status = 400;
-        throw err;
+    if (!sub.razorpay_subscription_id) throw billingError('No subscription to cancel', 400);
+    const remote = await providerRequest(`/subscriptions/${sub.razorpay_subscription_id}`);
+    const atEnd = remote.status === 'active';
+    if (!['cancelled', 'completed', 'expired'].includes(remote.status)) {
+        await providerRequest(`/subscriptions/${sub.razorpay_subscription_id}/cancel`, { cancel_at_cycle_end: atEnd ? 1 : 0 });
     }
-    const auth = razorpayAuth();
-    if (auth) {
-        await fetch(`${RAZORPAY_API}/subscriptions/${sub.razorpay_subscription_id}/cancel`, {
-            method: 'POST',
-            headers: { Authorization: auth.header, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cancel_at_cycle_end: 1 }),
-        }).catch((e) => console.error('[billing] razorpay cancel failed:', e.message));
-    }
-    await supabaseAdmin
-        .from('subscriptions')
-        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-        .eq('user_id', userId);
-    return { cancelled: true };
+    await saveSubscription(userId, { cancel_at_period_end: atEnd,
+        ...(atEnd ? {} : { status: 'cancelled' }), updated_at: new Date().toISOString() }, sub.razorpay_subscription_id);
+    return { cancelled: true, cancelAtPeriodEnd: atEnd };
 };
 
-/**
- * Razorpay webhook — the source of truth for recurring status. Verified with
- * the webhook secret, then maps the event to a subscription status.
- */
 export const handleWebhook = async (rawBody, signature) => {
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-    if (!secret) {
-        console.warn('[billing] webhook received but RAZORPAY_WEBHOOK_SECRET is not set — ignoring');
-        return { ignored: true };
-    }
+    if (!secret) throw billingError('Webhook verification is not configured', 503);
     const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-    if (expected !== signature) {
-        const err = new Error('Invalid webhook signature');
-        err.status = 400;
-        throw err;
+    if (!/^[a-f0-9]{64}$/i.test(signature || '') || !crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(signature, 'hex'))) {
+        throw billingError('Invalid webhook signature', 400);
     }
-
     const event = JSON.parse(rawBody.toString('utf8'));
-    const sub = event?.payload?.subscription?.entity;
-    if (!sub?.id) return { ignored: true };
+    const entity = event?.payload?.subscription?.entity;
+    if (!entity?.id || !event.event?.startsWith('subscription.')) return { ignored: true };
+    const { data: sub, error } = await supabaseAdmin.from('subscriptions').select('*')
+        .eq('razorpay_subscription_id', entity.id).maybeSingle();
+    if (error) throw error;
+    if (!sub) throw billingError('Subscription has not been saved yet; retry delivery', 503);
+    // Fetch current state, so a delayed failure event cannot undo a later payment.
+    const remote = await providerRequest(`/subscriptions/${entity.id}`);
+    const patch = providerPatch(remote, sub);
+    const { error: updateError } = await supabaseAdmin.from('subscriptions').update(patch)
+        .eq('user_id', sub.user_id).eq('razorpay_subscription_id', entity.id);
+    if (updateError) throw updateError;
+    return { ok: true };
+};
 
-    const STATUS = {
-        'subscription.activated': 'active',
-        'subscription.charged': 'active',
-        'subscription.pending': 'past_due',
-        'subscription.halted': 'halted',
-        'subscription.cancelled': 'cancelled',
-        'subscription.completed': 'cancelled',
-    };
-    const status = STATUS[event.event];
-    if (!status) return { ignored: true };
+export const billingOwner = async (userId, workspaceId) => {
+    if (!workspaceId) return userId;
+    const { data, error } = await supabaseAdmin.from('workspaces').select('owner_id').eq('id', workspaceId).single();
+    if (error) throw error;
+    return data.owner_id;
+};
 
-    const patch = { status, updated_at: new Date().toISOString() };
-    if (sub.current_end) patch.current_period_end = new Date(sub.current_end * 1000).toISOString();
+export const reserveUsage = async (userId, workspaceId, kind = 'generations') => {
+    const ownerId = await billingOwner(userId, workspaceId);
+    const sub = await ensureSubscription(ownerId);
+    if (sub.billing_exempt) return null;
+    if (!subscriptionAccess(sub).active) throw billingError('Set up payment authorization or renew your subscription to continue');
+    const plan = await getPlanRow(sub.plan_key);
+    if (kind === 'trial_auto_posts' && !subscriptionAccess(sub).trialActive) return;
+    const limit = kind === 'generations' ? plan.generation_limit : plan.trial_auto_post_limit;
+    const period = kind === 'generations' ? generationPeriod(sub) : `trial:${sub.id}`;
+    const { data, error } = await supabaseAdmin.rpc('reserve_subscription_usage', {
+        p_user: ownerId, p_kind: kind, p_period: period, p_limit: limit,
+    });
+    if (error) throw error;
+    if (!data) throw billingError(kind === 'generations' ? 'Your AI generation allowance is used up' : 'Your trial automatic-post allowance is used up');
+    return limit == null ? null : { p_user: ownerId, p_kind: kind, p_period: period };
+};
 
-    await supabaseAdmin
-        .from('subscriptions')
-        .update(patch)
-        .eq('razorpay_subscription_id', sub.id);
-    return { ok: true, status };
+export const releaseUsage = async (reservation) => {
+    if (!reservation || reservation.released) return;
+    reservation.released = true;
+    const { p_user, p_kind, p_period } = reservation;
+    const { error } = await supabaseAdmin.rpc('release_subscription_usage', { p_user, p_kind, p_period });
+    if (error) console.error('[billing] Could not release failed operation quota:', error.message);
+};
+
+export const withGenerationUsage = async (userId, workspaceId, operation) => {
+    const reservation = await reserveUsage(userId, workspaceId);
+    try {
+        const result = await operation();
+        if (result.generationConfigured === false) await releaseUsage(reservation);
+        return result;
+    } catch (error) {
+        await releaseUsage(reservation);
+        throw error;
+    }
 };
 
 export { TRIAL_DAYS };

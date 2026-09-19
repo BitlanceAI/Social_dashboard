@@ -82,7 +82,7 @@ export const FullScreenSignup = ({
                         </div>
                         <h2 className="text-3xl font-bold tracking-tight mb-2">Create Account</h2>
                         <p className="text-gray-600" style={{ fontFamily: "'DM Mono', monospace", fontSize: 13 }}>
-                            Takes less than 60 seconds · No credit card required
+                            Create your account · Authorize payment to start your trial
                         </p>
                     </div>
 

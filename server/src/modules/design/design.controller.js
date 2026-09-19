@@ -1,3 +1,4 @@
+import { withGenerationUsage } from '../billing/billing.service.js';
 import * as svc from './design.service.js';
 
 const fail = (res, err, fallback) => {
@@ -10,7 +11,7 @@ export const generateFromTemplate = async (req, res) => {
     try {
         const { templateKey } = req.body || {};
         if (!templateKey) return res.status(400).json({ success: false, error: 'templateKey is required' });
-        res.json({ success: true, ...(await svc.generateFromTemplate(req.user.id, req.body || {}, req.workspaceId)) });
+        res.json({ success: true, ...(await withGenerationUsage(req.user.id, req.workspaceId, () => svc.generateFromTemplate(req.user.id, req.body || {}, req.workspaceId))) });
     } catch (err) { fail(res, err, 'Failed to generate the design'); }
 };
 

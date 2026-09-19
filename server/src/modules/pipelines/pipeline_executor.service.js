@@ -1,3 +1,4 @@
+import { reserveUsage, releaseUsage } from '../billing/billing.service.js';
 /**
  * Pipeline Execution Engine
  *
@@ -324,12 +325,19 @@ export const runPipeline = async (pipelineId) => {
     console.log(`[PipelineExecutor] Processing item "${item.title_hook}" for pipeline "${pipeline.name}"...`);
 
     // Mark status as generating
-    await db
-        .from('content_queue')
-        .update({ status: 'generating' })
-        .eq('id', item.id);
+    const { data: claimed, error: claimError } = await db
+        .from('content_queue').update({ status: 'generating' })
+        .eq('id', item.id).eq('status', 'pending').select('id').maybeSingle();
+    if (claimError) throw claimError;
+    if (!claimed) return { status: 'skipped', reason: 'already_claimed' };
 
+    let generationReservation;
+    let autoReservation;
+    let generated = false;
+    let publishAttempted = false;
     try {
+        if (pipeline.auto_publish) autoReservation = await reserveUsage(pipeline.user_id, pipeline.workspace_id, 'trial_auto_posts');
+        generationReservation = await reserveUsage(pipeline.user_id, pipeline.workspace_id);
         // 3. Generate AI Caption
         console.log('[PipelineExecutor] Generating AI caption...');
         const { caption, hashtags } = await generatePipelineCaption({
@@ -341,6 +349,7 @@ export const runPipeline = async (pipelineId) => {
             customTemplate: pipeline.caption_prompt_template,
         });
 
+        generated = true;
         const fullText = `${caption}\n\n${hashtags}`.trim();
 
         // 4. Generate AI Image
@@ -470,6 +479,7 @@ export const runPipeline = async (pipelineId) => {
                 const liService = new LinkedInService(decryptedToken);
                 const authorUrn = targetPageId || activeLiConn.author_urn;
 
+                publishAttempted = true;
                 const res = await liService.publishPost(authorUrn, {
                     commentary: fullText,
                     mediaUrls,
@@ -508,6 +518,7 @@ export const runPipeline = async (pipelineId) => {
                 const publishResults = {};
 
                 if (targetPlatforms.includes('facebook') || targetPlatforms.includes('meta')) {
+                    publishAttempted = true;
                     const fb = await metaService.publishPost(pageId, pageAccessToken, {
                         message: fullText,
                         mediaUrls,
@@ -522,6 +533,7 @@ export const runPipeline = async (pipelineId) => {
                 if (targetPlatforms.includes('instagram')) {
                     const igAccount = await metaService.getInstagramAccount(pageId, pageAccessToken);
                     if (igAccount.success) {
+                        publishAttempted = true;
                         const ig = await metaService.publishInstagramPost(
                             igAccount.instagramAccount.id,
                             pageAccessToken,
@@ -596,6 +608,8 @@ export const runPipeline = async (pipelineId) => {
             scheduledPostId,
         };
     } catch (err) {
+        if (!generated) await releaseUsage(generationReservation);
+        if (!publishAttempted) await releaseUsage(autoReservation);
         console.error(`❌ [PipelineExecutor] Failed to process item "${item.title_hook}":`, err.message);
 
         await db

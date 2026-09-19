@@ -30,8 +30,10 @@ export const getMe = async (req, res) => {
 export const subscribe = async (req, res) => {
     try {
         const { planKey, interval } = req.body || {};
+        if (req.body?.recurringConsent !== true) return res.status(400).json({ error: 'Authorize recurring payments to continue' });
         if (!planKey) return res.status(400).json({ success: false, error: 'planKey is required' });
-        const chosen = interval === 'yearly' ? 'yearly' : 'monthly';
+        if (!['monthly', 'yearly'].includes(interval)) return res.status(400).json({ error: 'Choose monthly or yearly billing' });
+        const chosen = interval;
         res.status(201).json({ success: true, ...(await billingService.createSubscription(req.user.id, planKey, chosen)) });
     } catch (err) {
         fail(res, err, 'Failed to start the subscription');

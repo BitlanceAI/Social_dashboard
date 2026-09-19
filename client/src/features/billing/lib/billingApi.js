@@ -35,8 +35,8 @@ const request = async (path, { method = 'GET', body } = {}) => {
 };
 
 export const fetchMyBilling = () => request('/me');
-export const subscribe = ({ planKey, interval }) =>
-    request('/subscribe', { method: 'POST', body: { planKey, interval } });
+export const subscribe = ({ planKey, interval, recurringConsent }) =>
+    request('/subscribe', { method: 'POST', body: { planKey, interval, recurringConsent } });
 export const verifySubscription = (payload) =>
     request('/verify', { method: 'POST', body: payload });
 export const cancelSubscription = () => request('/cancel', { method: 'POST' });

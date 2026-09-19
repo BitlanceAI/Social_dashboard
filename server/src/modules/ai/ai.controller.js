@@ -1,3 +1,4 @@
+import { withGenerationUsage } from '../billing/billing.service.js';
 import * as svc from './ai.service.js';
 
 const fail = (res, err, fallback) => {
@@ -8,7 +9,7 @@ const fail = (res, err, fallback) => {
 /** POST /api/ai/caption */
 export const generateCaption = async (req, res) => {
     try {
-        res.json({ success: true, ...(await svc.generateCaption(req.body || {})) });
+        res.json({ success: true, ...(await withGenerationUsage(req.user.id, req.workspaceId, () => svc.generateCaption(req.body || {}))) });
     } catch (err) { fail(res, err, 'Failed to write the caption'); }
 };
 
