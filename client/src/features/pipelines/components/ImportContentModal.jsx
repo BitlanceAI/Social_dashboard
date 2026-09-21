@@ -3,6 +3,7 @@ import { X, Upload, FileText, CheckCircle2, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { importPipelineItems } from '../lib/pipelinesApi';
 import { useWorkspace } from '@/features/workspace';
+import { parseContentCSV, normalizeContentItem } from '../lib/pipeline-content.mjs';
 
 const loadXLSXLib = () => {
   return new Promise((resolve, reject) => {
@@ -25,55 +26,14 @@ export default function ImportContentModal({ isOpen, onClose, pipelineId, onImpo
 
   if (!isOpen) return null;
 
-  // Simple CSV parser fallback
-  const parseCSV = (text) => {
-    const lines = text.split('\n').filter((l) => l.trim());
-    if (lines.length < 2) return [];
-
-    const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
-    const rows = [];
-
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',').map((v) => v.trim().replace(/^"|"$/g, ''));
-      const obj = {};
-      headers.forEach((h, idx) => {
-        obj[h] = values[idx] || '';
-      });
-
-      const titleHook = obj['Post Title / Hook'] || obj.titleHook || obj.hook || obj.Hook || obj.title || values[0] || '';
-      if (titleHook) {
-        rows.push({
-          day: obj.Day || obj.day || `Day ${i}`,
-          dateStr: obj.Date || obj.date || '',
-          titleHook,
-          contentPillar: obj['Content Pillar'] || obj.contentPillar || obj.pillar || '',
-          captionOutline: obj['Caption Outline'] || obj.captionOutline || obj.outline || '',
-          format: obj.Format || obj.format || '',
-          cta: obj.CTA || obj.cta || '',
-        });
-      }
-    }
-    return rows;
-  };
-
-  const mapRawObjectToItem = (obj, idx) => {
-    const titleHook = obj['Post Title / Hook'] || obj.titleHook || obj.hook || obj.Hook || obj['Title'] || obj.title || obj['Post Title'] || obj['Hook'] || Object.values(obj)[0] || '';
-    if (!titleHook) return null;
-    return {
-      day: String(obj.Day || obj.day || obj['DAY'] || `Day ${idx + 1}`),
-      dateStr: String(obj.Date || obj.date || obj['DATE'] || ''),
-      titleHook: String(titleHook),
-      contentPillar: String(obj['Content Pillar'] || obj.contentPillar || obj.pillar || obj.Pillar || obj['Pillar'] || ''),
-      captionOutline: String(obj['Caption Outline'] || obj.captionOutline || obj.outline || obj.Outline || obj['Outline'] || ''),
-      format: String(obj.Format || obj.format || obj.type || obj.Type || obj['FORMAT'] || ''),
-      cta: String(obj.CTA || obj.cta || obj['Cta'] || ''),
-    };
-  };
+  const parseCSV = text => parseContentCSV(text).map(normalizeContentItem);
+  const mapRawObjectToItem = normalizeContentItem;
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setParsedRows([]);
     setFileName(file.name);
     const lowerName = file.name.toLowerCase();
 
@@ -138,6 +98,7 @@ export default function ImportContentModal({ isOpen, onClose, pipelineId, onImpo
   };
 
   const handlePasteParse = () => {
+    setParsedRows([]);
     if (!rawText.trim()) return;
     try {
       if (rawText.trim().startsWith('[')) {
@@ -152,7 +113,7 @@ export default function ImportContentModal({ isOpen, onClose, pipelineId, onImpo
       }
       toast.success('Pasted content parsed successfully');
     } catch (err) {
-      toast.error('Failed to parse text. Please ensure valid CSV or JSON format.');
+      toast.error(err.message || 'Invalid CSV or JSON.');
     }
   };
 
@@ -237,7 +198,7 @@ export default function ImportContentModal({ isOpen, onClose, pipelineId, onImpo
                   <p className="text-sm font-bold text-[var(--text)]">
                     {fileName ? fileName : 'Click to upload or drag & drop Excel (.xlsx), CSV, or JSON file'}
                   </p>
-                  <p className="text-xs text-[var(--muted)] mt-1">Supports columns: Post Title / Hook, Content Pillar, Caption Outline, Format, CTA</p>
+                  <p className="text-xs text-[var(--muted)] mt-1">Supports columns: Post Title / Hook, Content Pillar, Caption Outline, Format, CTA. Rows marked Posted are skipped; repeated imports skip matching content.</p>
                 </div>
               </label>
             </div>
@@ -247,7 +208,7 @@ export default function ImportContentModal({ isOpen, onClose, pipelineId, onImpo
                 rows={6}
                 placeholder={`Post Title / Hook, Content Pillar, Caption Outline, Format, CTA\n"How AI Streamlines Support", SaaS, Explain chatbot workflows, Story, Follow for tech tips`}
                 value={rawText}
-                onChange={(e) => setRawText(e.target.value)}
+                onChange={(e) => { setRawText(e.target.value); setParsedRows([]); }}
                 className="w-full p-4 bg-[var(--bg)] border border-[var(--border)] rounded-2xl text-xs font-mono text-[var(--text)] placeholder-[var(--muted-2)] focus:outline-none focus:border-[var(--accent)]"
               />
               <button
@@ -280,8 +241,10 @@ export default function ImportContentModal({ isOpen, onClose, pipelineId, onImpo
                 {parsedRows.map((row, idx) => (
                   <div key={idx} className="p-2.5 bg-[var(--surface)] rounded-xl text-xs flex items-center justify-between border border-[var(--border)]">
                     <div className="min-w-0 flex-1 pr-2">
-                      <p className="font-bold text-[var(--text)] truncate">{row.titleHook}</p>
-                      <p className="text-[11px] text-[var(--muted)] truncate">{row.contentPillar || 'No Pillar'} | {row.format || 'Standard'}</p>
+                      <p className="font-bold text-[var(--text)] break-words">Topic: {row.titleHook}</p>
+                      <p className="text-[11px] text-[var(--muted)] truncate">Category: {row.contentPillar || 'None'} | Format: {row.format || 'Standard'}</p>
+                      <p className="mt-1 whitespace-pre-wrap break-words">Brief: {row.captionOutline || 'None'}</p>
+                      <p className="mt-1 break-words">CTA: {row.cta || 'None'} | Source status: {row.sourceStatus || 'Not supplied'}</p>
                     </div>
                     <span className="text-[10px] px-2.5 py-1 rounded-full bg-[var(--surface-2)] text-[var(--muted)] font-mono uppercase shrink-0">
                       {row.day || `Row ${idx + 1}`}

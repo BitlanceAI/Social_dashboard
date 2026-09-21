@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, CheckCircle2, Clock, MessageCircle, RefreshCw, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import API_BASE_URL from '@/shared/config';
+import RevisionDialog from './RevisionDialog';
 
 const buttonClass = 'inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed';
 const formatTime = (value, timezone) => {
@@ -24,6 +25,7 @@ export default function ApprovalQueuePanel({ queue, token, workspaceId, onChange
     const [busy, setBusy] = useState(null);
     const [decision, setDecision] = useState(null);
     const [reason, setReason] = useState('');
+    const [revision, setRevision] = useState(null);
     const alive = useRef(true);
     const actionLock = useRef(false);
     const dialog = useRef(null);
@@ -110,6 +112,9 @@ export default function ApprovalQueuePanel({ queue, token, workspaceId, onChange
                                     <p className="text-xs text-[var(--muted)] break-words">Rejected by: {reviewerLabel(post.rejected_by)}</p>
                                     <p className="text-xs text-[var(--muted)]">Rejected at: {formatTime(post.rejected_at, post.timezone)}</p>
                                     <p className="whitespace-pre-wrap break-words text-sm text-[var(--text)]">{post.rejection_comment || (post.awaiting_rejection_feedback ? 'Waiting for feedback from the reviewer.' : 'No reason provided.')}</p>
+                                    {post.resubmitted_post_id ? <p className="text-sm font-medium text-[var(--text)]">A revision has been submitted. This original is kept for reference.</p>
+                                        : <button className={buttonClass} disabled={!!busy || queue.loading || !!queue.error || !post.rejection_comment?.trim()}
+                                            onClick={() => setRevision({ post, workspaceId })}>Revise with AI</button>}
                                 </div>}
                                 {section === 'pending' && <div className="flex flex-wrap gap-2 pt-2">
                                     <button disabled={!!busy || queue.loading || !!queue.error} className={`${buttonClass} bg-[var(--accent-muted)]`} onClick={() => { setReason(''); setDecision({ post, action: 'approve', overdue: new Date(post.scheduled_time).getTime() <= Date.now() }); }}><Check size={16} />Approve</button>
@@ -135,6 +140,8 @@ export default function ApprovalQueuePanel({ queue, token, workspaceId, onChange
                     <button className={`${buttonClass} bg-[var(--accent-muted)]`} disabled={!!busy} onClick={() => act(decision.post, decision.action)}>{busy ? 'Saving…' : decision.action === 'approve' ? 'Confirm approval' : 'Confirm rejection'}</button>
                 </div>
             </dialog>}
+            {revision?.workspaceId === workspaceId && <RevisionDialog key={`${workspaceId}:${revision.post.id}`} post={revision.post} token={token} workspaceId={workspaceId}
+                onClose={() => setRevision(null)} onSubmitted={() => { setRevision(null); setSection('pending'); queue.refresh(); onChanged?.(); }} />}
         </section>
     );
 }

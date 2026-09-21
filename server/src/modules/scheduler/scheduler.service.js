@@ -180,7 +180,7 @@ const checkAndRunPipelines = async () => {
 
                 if (hoursSinceLastRun >= 20) {
                     console.log(`[Scheduler] Triggering scheduled pipeline run for "${pipeline.name}" (${pipeline.id})...`);
-                    await runPipeline(pipeline.id).catch((err) => {
+                    await runPipeline(pipeline.id, pipeline.workspace_id).catch((err) => {
                         console.error(`[Scheduler] Pipeline "${pipeline.name}" execution error:`, err.message);
                     });
                 }

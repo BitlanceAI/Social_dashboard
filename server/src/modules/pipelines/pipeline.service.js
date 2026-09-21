@@ -1,3 +1,4 @@
+import { normalizeContentItem } from '../../shared/utils/pipeline-content.mjs';
 /**
  * Pipeline Management Service
  */
@@ -85,8 +86,9 @@ export const updatePipeline = async (pipelineId, workspaceId, patch) => {
     if (patch.autoPublish !== undefined) updateData.auto_publish = patch.autoPublish;
     if (patch.status !== undefined) updateData.status = patch.status;
 
-    for (const key of Object.keys(patch)) {
-        if (key.includes('_')) {
+    const allowedAliases = ['trigger_time', 'target_platforms', 'page_id', 'sheet_url', 'brand_logo_text', 'auto_publish'];
+    for (const key of allowedAliases) {
+        if (patch[key] !== undefined) {
             updateData[key] = patch[key];
         }
     }
@@ -130,16 +132,31 @@ export const getQueueItems = async (pipelineId, workspaceId) => {
 
 export const addQueueItems = async (pipelineId, workspaceId, items = []) => {
     if (!items.length) return [];
+    await getPipelineById(pipelineId, workspaceId);
 
-    const rows = items.map((i) => ({
+    const normalized = items.map(normalizeContentItem)
+        .filter(item => !item.sourceStatus || item.sourceStatus.toLowerCase() === 'pending');
+    const existing = await getQueueItems(pipelineId, workspaceId);
+    // Preserve already-generated content when the same source is imported again.
+    const identity = row => JSON.stringify([row.day || '', row.dateStr || row.date_str || '', row.titleHook || row.title_hook || '']);
+    const seen = new Set(existing.map(identity));
+    const fresh = normalized.filter(item => {
+        const key = identity(item);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+    if (!fresh.length) return [];
+
+    const rows = fresh.map((i) => ({
         pipeline_id: pipelineId,
         workspace_id: workspaceId,
         day: String(i.day || i.Day || '').slice(0, 49),
         date_str: String(i.dateStr || i.date || i.Date || '').slice(0, 49),
         title_hook: String(i.titleHook || i['Post Title / Hook'] || i.title || i.Title || 'Untitled Post'),
-        content_pillar: String(i.contentPillar || i['Content Pillar'] || i.pillar || i.Pillar || '').slice(0, 254),
+        content_pillar: i.contentPillar,
         caption_outline: String(i.captionOutline || i['Caption Outline'] || i.outline || i.Outline || ''),
-        format: String(i.format || i.Format || i.type || i.Type || '').slice(0, 99),
+        format: i.format,
         cta: String(i.cta || i.CTA || ''),
         status: 'pending',
     }));
@@ -163,4 +180,3 @@ export const clearQueueItems = async (pipelineId, workspaceId) => {
     if (error) throw error;
     return { success: true };
 };
-

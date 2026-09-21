@@ -52,7 +52,7 @@ export const deletePipeline = async (req, res) => {
 
 export const runPipelineNow = async (req, res) => {
     try {
-        const result = await runPipeline(req.params.id);
+        const result = await runPipeline(req.params.id, req.workspaceId);
         res.json({ success: true, result });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -106,4 +106,3 @@ export const clearQueue = async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     }
 };
-

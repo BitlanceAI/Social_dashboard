@@ -1,6 +1,6 @@
 import ApprovalQueuePanel from '@/features/meta/components/ApprovalQueuePanel';
 import useApprovalQueue from '@/features/meta/hooks/useApprovalQueue';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Facebook } from 'lucide-react';
 import { platformMeta, providerOf, prefixFor, charLimitFor } from '@/features/meta/lib/providers';
 import AnalyticsPanel from '@/features/meta/components/AnalyticsPanel';
@@ -10,7 +10,7 @@ import AddProfileModal from '@/features/meta/components/AddProfileModal';
 import PageSelectModal from '@/features/meta/components/PageSelectModal';
 import NotificationToggle from '@/features/notifications/components/NotificationToggle';
 import { NotificationsBell } from '@/features/notifications';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/features/auth/context/AuthContext';
 import { useWorkspace, WorkspaceSwitcher } from '@/features/workspace';
 import { MediaLibrary } from '@/features/storage';
@@ -72,6 +72,8 @@ import BulkUploadModal from '@/features/meta/components/BulkUploadModal';
 // One OAuth token is completed exactly once, no matter how many times the
 // effect or auth-state handler re-fires it — kills the duplicate connect toast.
 const processedOAuthTokens = new Set();
+const PipelinesPage = lazy(() => import('@/features/pipelines/pages/PipelinesPage'));
+const dashboardTabs = new Set(['create', 'approvals', 'profiles', 'library', 'history', 'analytics']);
 
 const MetaDashboardView = ({ activeTab, setActiveTab }) => {
     const navigate = useNavigate();
@@ -1116,6 +1118,11 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
 
 
                         {/* Approval Queue */}
+                        {activeTab === 'pipelines' && (
+                            <Suspense fallback={<p role="status">Loading AI Pipelines…</p>}>
+                                <PipelinesPage />
+                            </Suspense>
+                        )}
                         {activeTab === 'approvals' && (
                             <ApprovalQueuePanel
                                 key={activeWorkspaceId}
@@ -1593,7 +1600,19 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
  */
 const MetaDashboardPage = () => {
     const { activeWorkspaceId } = useWorkspace();
-    const [activeTab, setActiveTab] = useState('create');
+    const { pathname } = useLocation();
+    const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const requestedTab = searchParams.get('tab');
+    const activeTab = pathname === '/pipelines' ? 'pipelines' : dashboardTabs.has(requestedTab) ? requestedTab : 'create';
+    const setActiveTab = tab => {
+        if (tab === 'pipelines') {
+            navigate('/pipelines');
+        } else if (dashboardTabs.has(tab)) {
+            if (pathname === '/pipelines') navigate(`/socialdashboad?tab=${tab}`);
+            else setSearchParams(previous => { const next = new URLSearchParams(previous); next.set('tab', tab); return next; });
+        }
+    };
     return <MetaDashboardView key={activeWorkspaceId || 'none'} activeTab={activeTab} setActiveTab={setActiveTab} />;
 };
 

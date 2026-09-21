@@ -97,14 +97,9 @@ const DashboardSidebar = ({
                     return (
                         <button
                             key={id}
-                            onClick={() => {
-                                if (id === 'pipelines') {
-                                    navigate('/pipelines');
-                                } else if (!disabled) {
-                                    onNavigate(id);
-                                }
-                            }}
+                            onClick={() => { if (!disabled) onNavigate(id); }}
                             disabled={disabled}
+                            aria-current={isActive ? 'page' : undefined}
                             className={itemClass(disabled, isActive)}
                         >
                             <Icon className="h-4 w-4 shrink-0" />
@@ -172,14 +167,9 @@ export const DashboardMobileNav = ({ active, onNavigate, isConnected, approvalCo
                     return (
                         <button
                             key={id}
-                            onClick={() => {
-                                if (id === 'pipelines') {
-                                    window.location.href = '/pipelines';
-                                } else if (!disabled) {
-                                    onNavigate(id);
-                                }
-                            }}
+                            onClick={() => { if (!disabled) onNavigate(id); }}
                             disabled={disabled}
+                            aria-current={isActive ? 'page' : undefined}
                             aria-label={id === 'approvals' ? `${label}, ${approvalCount} pending` : label}
                             className={`relative flex-1 min-w-0 flex flex-col items-center gap-1 py-2 rounded-xl transition-colors ${
                                 disabled

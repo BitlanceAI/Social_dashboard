@@ -365,7 +365,7 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
               />
               <div className="flex flex-wrap gap-1.5 items-center pt-1">
                 <span className="text-[10px] text-[var(--muted)]">Insert tag:</span>
-                {['{{titleHook}}', '{{contentPillar}}', '{{brandLogoText}}'].map((tag) => (
+                {['{{titleHook}}', '{{contentPillar}}', '{{brandLogoText}}', '{{captionOutline}}', '{{caption}}'].map((tag) => (
                   <button
                     type="button"
                     key={tag}
@@ -393,7 +393,7 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
               className="w-4 h-4 rounded border-[var(--border)] bg-[var(--surface)] text-[var(--accent)] focus:ring-[var(--accent)]/30"
             />
             <label htmlFor="autoPublish" className="text-xs font-medium text-[var(--text)] cursor-pointer">
-              Auto-Publish Immediately (If unchecked, generated posts go to Approval Queue)
+              Auto-Publish Immediately (If unchecked, posts go to Approval Queue and WhatsApp requests use your workspace’s default approvers)
             </label>
           </div>
 

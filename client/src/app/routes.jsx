@@ -15,7 +15,6 @@ const DataDeletionPage = lazy(() => import('@/features/legal/pages/DataDeletionP
 const AdminPanelPage   = lazy(() => import('@/features/admin/pages/AdminPanelPage'));
 const StoragePage      = lazy(() => import('@/features/storage/pages/StoragePage'));
 const BillingPage      = lazy(() => import('@/features/billing/pages/BillingPage'));
-const PipelinesPage    = lazy(() => import('@/features/pipelines/pages/PipelinesPage'));
 
 const guarded = (element) => <AuthGuard>{element}</AuthGuard>;
 
@@ -33,7 +32,7 @@ export const routes = [
   { path: '/socialdashboad', element: guarded(<MetaDashboardPage />) },
 
   // AI Content Automation Pipelines
-  { path: '/pipelines', element: guarded(<PipelinesPage />) },
+  { path: '/pipelines', element: guarded(<MetaDashboardPage />) },
 
   // Admin panel — the server enforces users.role='admin'; the page renders
   // an access-denied screen for everyone else

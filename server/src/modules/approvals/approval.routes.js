@@ -29,11 +29,30 @@ import {
 } from './approval.service.js';
 
 import { loadApprovalQueue, parseQueuePage } from './approval.store.js';
+import { loadRejectedPost, generateRevision, resubmitRevision } from './revision.service.js';
 
 const router = express.Router();
 
 router.use(authenticateUser);
 router.use(resolveWorkspace);
+
+router.post('/:id/revise', async (req, res) => {
+    try {
+        const post = await loadRejectedPost(req.params.id, req.workspaceId);
+        res.json({ success: true, ...await generateRevision(post, req.user.id) });
+    } catch (err) {
+        res.status(err.status || 500).json({ error: err.status ? err.message : 'Could not generate a revision.' });
+    }
+});
+
+router.post('/:id/resubmit', async (req, res) => {
+    try {
+        const post = await loadRejectedPost(req.params.id, req.workspaceId);
+        res.json(await resubmitRevision(post, req.body || {}));
+    } catch (err) {
+        res.status(err.status || 500).json({ error: err.status ? err.message : 'Could not resubmit the revision.' });
+    }
+});
 
 const loadPendingPost = async (req, res) => {
     const { data: post, error } = await supabaseAdmin
