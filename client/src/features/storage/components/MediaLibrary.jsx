@@ -17,6 +17,8 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
     const [media, setMedia] = useState([]);
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
+    const [isDragOver, setIsDragOver] = useState(false);
+    const [previewItem, setPreviewItem] = useState(null);
     const inputRef = useRef(null);
 
     const load = useCallback(async () => {
@@ -33,9 +35,7 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
 
     useEffect(() => { load(); }, [load]);
 
-    const handleUpload = async (e) => {
-        const files = Array.from(e.target.files || []);
-        e.target.value = '';
+    const processUpload = async (files) => {
         if (!files.length || uploading) return;
         setUploading(true);
         try {
@@ -48,6 +48,29 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
         } finally {
             setUploading(false);
         }
+    };
+
+    const handleUpload = (e) => {
+        const files = Array.from(e.target.files || []);
+        e.target.value = '';
+        processUpload(files);
+    };
+
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        setIsDragOver(true);
+    };
+
+    const handleDragLeave = (e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+    };
+
+    const handleDrop = (e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        const files = Array.from(e.dataTransfer.files || []);
+        processUpload(files);
     };
 
     const handleDelete = async (item) => {
@@ -74,11 +97,18 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
 
             <button
                 onClick={() => inputRef.current?.click()}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
                 disabled={uploading}
-                className="w-full flex flex-col items-center gap-2 rounded-xl border border-dashed border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface)] py-6 mb-4 transition-colors disabled:opacity-60"
+                className={`w-full flex flex-col items-center gap-2 rounded-xl border border-dashed py-6 mb-4 transition-colors disabled:opacity-60 ${
+                    isDragOver
+                        ? 'border-[var(--accent)] bg-[var(--accent)]/5'
+                        : 'border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface)]'
+                }`}
             >
                 <UploadCloud className="h-5 w-5 text-[var(--accent)]" />
-                <span className="text-xs font-medium">{uploading ? 'Uploading…' : 'Upload to your library'}</span>
+                <span className="text-xs font-medium">{uploading ? 'Uploading…' : isDragOver ? 'Drop files here' : 'Upload to your library'}</span>
                 <span className="text-[11px] text-[var(--muted)]">Images and video, up to 100 MB each</span>
             </button>
 
@@ -97,10 +127,8 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
                         return (
                             <div
                                 key={item.id}
-                                onClick={onPick ? () => onPick(item) : undefined}
-                                className={`group relative rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden ${
-                                    onPick ? 'cursor-pointer hover:border-[var(--accent)]' : ''
-                                } transition-colors`}
+                                onClick={onPick ? () => onPick(item) : () => setPreviewItem(item)}
+                                className="group relative rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden cursor-pointer hover:border-[var(--accent)] transition-colors"
                             >
                                 <div className="aspect-square bg-[var(--surface-2)] flex items-center justify-center overflow-hidden">
                                     {isVideo ? (
@@ -125,6 +153,38 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
                             </div>
                         );
                     })}
+                </div>
+            )}
+
+            {previewItem && (
+                <div 
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+                    onClick={() => setPreviewItem(null)}
+                >
+                    <div className="relative max-w-4xl w-full max-h-[90vh] flex flex-col items-center justify-center">
+                        <button 
+                            className="absolute -top-10 right-0 text-white hover:text-gray-300 text-sm font-medium"
+                            onClick={() => setPreviewItem(null)}
+                        >
+                            Close
+                        </button>
+                        {previewItem.mime_type?.startsWith('video/') ? (
+                            <video 
+                                src={previewItem.url} 
+                                controls 
+                                autoPlay 
+                                className="max-w-full max-h-[85vh] rounded-lg shadow-2xl"
+                                onClick={(e) => e.stopPropagation()}
+                            />
+                        ) : (
+                            <img 
+                                src={previewItem.url} 
+                                alt={previewItem.file_name} 
+                                className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
+                                onClick={(e) => e.stopPropagation()}
+                            />
+                        )}
+                    </div>
                 </div>
             )}
         </div>
