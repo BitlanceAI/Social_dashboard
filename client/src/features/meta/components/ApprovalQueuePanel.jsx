@@ -12,6 +12,12 @@ const formatTime = (value, timezone) => {
     catch { return date.toLocaleString(); }
 };
 const statusLabels = { pending: 'Approved · Scheduled', processing: 'Publishing', scheduled: 'Scheduled with platform' };
+const reviewerLabel = value => {
+    if (!value) return 'Not recorded';
+    if (value.startsWith('dashboard:')) return `Dashboard user (${value.slice('dashboard:'.length)})`;
+    if (value === 'dashboard') return 'Dashboard';
+    return /^\d+$/.test(value) ? `+${value}` : value;
+};
 
 export default function ApprovalQueuePanel({ queue, token, workspaceId, onChanged }) {
     const [section, setSection] = useState('pending');
@@ -50,9 +56,9 @@ export default function ApprovalQueuePanel({ queue, token, workspaceId, onChange
             if (alive.current) setBusy(null);
         }
     };
-    const posts = (section === 'pending' ? queue.data?.posts : queue.data?.approvedPosts) || [];
-    const count = (section === 'pending' ? queue.data?.pendingCount : queue.data?.approvedCount) || 0;
-    const page = section === 'pending' ? queue.pendingPage : queue.approvedPage;
+    const posts = (section === 'pending' ? queue.data?.posts : queue.data?.[`${section}Posts`]) || [];
+    const count = queue.data?.[`${section}Count`] || 0;
+    const page = queue[`${section}Page`];
     const pages = Math.max(1, Math.ceil(count / (queue.data?.pageSize || 25)));
 
     return (
@@ -66,7 +72,7 @@ export default function ApprovalQueuePanel({ queue, token, workspaceId, onChange
                 <button className={buttonClass} disabled={queue.loading} onClick={queue.refresh}><RefreshCw size={16} className={queue.loading ? 'animate-spin' : ''} />Refresh</button>
             </header>
             <div className="flex flex-wrap gap-2" aria-label="Approval sections">
-                {[['pending', 'Pending approval', queue.data?.pendingCount], ['approved', 'Approved / Scheduled', queue.data?.approvedCount]].map(([key, label, total]) => (
+                {[['pending', 'Pending approval', queue.data?.pendingCount], ['approved', 'Approved / Scheduled', queue.data?.approvedCount], ['rejected', 'Rejected', queue.data?.rejectedCount]].map(([key, label, total]) => (
                     <button key={key} aria-pressed={section === key} onClick={() => setSection(key)} className={`${buttonClass} ${section === key ? 'bg-[var(--accent-muted)] border-[var(--accent)]' : ''}`}>
                         {label}<span className="font-mono text-xs">{total ?? '—'}</span>
                     </button>
@@ -76,8 +82,8 @@ export default function ApprovalQueuePanel({ queue, token, workspaceId, onChange
             {!queue.data && !queue.error ? <p role="status" className="text-[var(--muted)]">Loading approval queue…</p> : posts.length === 0 && !queue.error ? (
                 <div className="rounded-2xl border border-dashed border-[var(--border)] py-16 text-center">
                     <CheckCircle2 className="mx-auto mb-3 text-[var(--accent)]" size={32} />
-                    <h2 className="text-lg text-[var(--text)]">{section === 'pending' ? 'No posts waiting for approval' : 'No approved posts awaiting publication'}</h2>
-                    <p className="text-sm text-[var(--muted)] mt-2">{section === 'pending' ? 'Schedule a post with approver numbers to send it for review.' : 'Approved posts appear here until publishing finishes.'}</p>
+                    <h2 className="text-lg text-[var(--text)]">{section === 'pending' ? 'No posts waiting for approval' : section === 'rejected' ? 'No rejected posts' : 'No approved posts awaiting publication'}</h2>
+                    <p className="text-sm text-[var(--muted)] mt-2">{section === 'pending' ? 'Schedule a post with approver numbers to send it for review.' : section === 'rejected' ? 'Posts rejected on WhatsApp or in the dashboard appear here with reviewer feedback.' : 'Approved posts appear here until publishing finishes.'}</p>
                 </div>
             ) : <div className="space-y-4" aria-busy={queue.loading}>
                 {posts.map(post => (
@@ -91,7 +97,7 @@ export default function ApprovalQueuePanel({ queue, token, workspaceId, onChange
                             <div className="flex-1 min-w-0 p-5 space-y-3">
                                 <div className="flex flex-wrap justify-between gap-2">
                                     <h2 className="font-semibold text-[var(--text)]">{post.page_name || 'Social account'}</h2>
-                                    <span className="text-xs rounded-full px-2.5 py-1 bg-[var(--accent-muted)] text-[var(--accent)]">{section === 'pending' ? 'Pending approval' : statusLabels[post.status] || post.status}</span>
+                                    <span className="text-xs rounded-full px-2.5 py-1 bg-[var(--accent-muted)] text-[var(--accent)]">{section === 'pending' ? 'Pending approval' : section === 'rejected' ? 'Rejected · Will not publish' : statusLabels[post.status] || post.status}</span>
                                 </div>
                                 <p className="text-xs uppercase tracking-wide text-[var(--muted)]">{(post.platforms?.length ? post.platforms : [post.provider === 'linkedin' ? 'linkedin' : 'facebook']).join(' · ')}</p>
                                 <p className="whitespace-pre-wrap break-words text-sm text-[var(--text)]">{post.content || 'No caption'}</p>
@@ -99,6 +105,12 @@ export default function ApprovalQueuePanel({ queue, token, workspaceId, onChange
                                 <p className="text-xs text-[var(--muted)] flex gap-2"><Clock size={14} className="shrink-0" />{formatTime(post.scheduled_time, post.timezone)}</p>
                                 <p className="text-xs text-[var(--muted)] break-words">Approvers: {(post.approver_phones || []).map(phone => `+${phone}`).join(', ') || 'None recorded'}</p>
                                 <p className="text-xs text-[var(--muted)]">{post.approval_sent_at ? `WhatsApp request sent ${formatTime(post.approval_sent_at)} · Delivery not confirmed` : 'WhatsApp request not sent or send not confirmed'}</p>
+                                {section === 'rejected' && <div className="rounded-xl border-l-4 border-[var(--accent)] bg-[var(--surface-2)] p-4 space-y-2">
+                                    <h3 className="text-sm font-semibold text-[var(--text)]">Rejection feedback</h3>
+                                    <p className="text-xs text-[var(--muted)] break-words">Rejected by: {reviewerLabel(post.rejected_by)}</p>
+                                    <p className="text-xs text-[var(--muted)]">Rejected at: {formatTime(post.rejected_at, post.timezone)}</p>
+                                    <p className="whitespace-pre-wrap break-words text-sm text-[var(--text)]">{post.rejection_comment || (post.awaiting_rejection_feedback ? 'Waiting for feedback from the reviewer.' : 'No reason provided.')}</p>
+                                </div>}
                                 {section === 'pending' && <div className="flex flex-wrap gap-2 pt-2">
                                     <button disabled={!!busy || queue.loading || !!queue.error} className={`${buttonClass} bg-[var(--accent-muted)]`} onClick={() => { setReason(''); setDecision({ post, action: 'approve', overdue: new Date(post.scheduled_time).getTime() <= Date.now() }); }}><Check size={16} />Approve</button>
                                     <button disabled={!!busy || queue.loading || !!queue.error} className={buttonClass} onClick={() => { setReason(''); setDecision({ post, action: 'reject' }); }}><X size={16} />Reject</button>
