@@ -7,6 +7,25 @@ import { supabaseAdmin, supabase } from '../../config/supabase.js';
 
 const getClient = () => supabaseAdmin || supabase;
 
+export const normalizePipelineApprovers = (input) => {
+    if (input == null || input === '') return [];
+    if (!Array.isArray(input) && typeof input !== 'string') {
+        throw new Error('Enter WhatsApp approval numbers with country codes, separated by commas.');
+    }
+    const parts = Array.isArray(input) ? input : input.split(/[,;\n]+/);
+    const phones = parts.map(value => {
+        if (typeof value !== 'string') throw new Error('WhatsApp approval numbers must be text.');
+        const valueTrimmed = value.trim();
+        if (!valueTrimmed) return null;
+        const phone = valueTrimmed.replace(/[\s()-]/g, '').replace(/^\+/, '');
+        if (!/^[1-9]\d{6,14}$/.test(phone)) {
+            throw new Error('Enter a valid WhatsApp approval number with country code (7–15 digits).');
+        }
+        return phone;
+    }).filter(Boolean);
+    return [...new Set(phones)];
+};
+
 export const getPipelines = async (workspaceId) => {
     if (!workspaceId) return [];
     const { data, error } = await getClient()
@@ -61,6 +80,7 @@ export const createPipeline = async (workspaceId, userId, payload) => {
             caption_prompt_template: captionPromptTemplate,
             image_prompt_template: imagePromptTemplate,
             auto_publish: autoPublish,
+            approver_phones: normalizePipelineApprovers(payload.approverPhones ?? payload.approver_phones),
             status: 'active',
         })
         .select()
@@ -84,6 +104,9 @@ export const updatePipeline = async (pipelineId, workspaceId, patch) => {
     if (patch.imagePromptTemplate !== undefined) updateData.image_prompt_template = patch.imagePromptTemplate;
     if (patch.image_prompt_template !== undefined) updateData.image_prompt_template = patch.image_prompt_template;
     if (patch.autoPublish !== undefined) updateData.auto_publish = patch.autoPublish;
+    if (patch.approverPhones !== undefined || patch.approver_phones !== undefined) {
+        updateData.approver_phones = normalizePipelineApprovers(patch.approverPhones ?? patch.approver_phones);
+    }
     if (patch.status !== undefined) updateData.status = patch.status;
 
     const allowedAliases = ['trigger_time', 'target_platforms', 'page_id', 'sheet_url', 'brand_logo_text', 'auto_publish'];

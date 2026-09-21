@@ -41,9 +41,9 @@ function database(tables) {
     } };
 }
 
-async function executor({ phones = ['919876543210'], enabled = true, failedDelivery = false } = {}) {
+async function executor({ phones = ['919876543210'], pipelinePhones, enabled = true, failedDelivery = false } = {}) {
     const tables = {
-        content_pipelines: [{ id: 'pipe', workspace_id: 'a', user_id: 'user', status: 'active', auto_publish: false, provider: 'linkedin' }],
+        content_pipelines: [{ id: 'pipe', workspace_id: 'a', user_id: 'user', status: 'active', auto_publish: false, provider: 'linkedin', approver_phones: pipelinePhones }],
         content_queue: [{ id: 'item', pipeline_id: 'pipe', workspace_id: 'a', status: 'pending', title_hook: 'Hook' }],
         linkedin_connections: [{ id: 'li', workspace_id: 'a', is_active: true, author_urn: 'urn:li:person:123' }],
         scheduled_posts: [],
@@ -105,6 +105,30 @@ test('pipeline updates cannot overwrite workspace, owner or run metadata', async
     assert.equal(tables.content_pipelines[0].last_run_at, undefined);
     assert.equal(tables.content_pipelines[0].caption_prompt_template, 'Allowed');
     assert.equal(tables.content_pipelines[0].auto_publish, false);
+});
+
+test('pipeline-specific approval numbers override workspace defaults; empty lists use defaults', async () => {
+    for (const pipelinePhones of [['447700900123'], []]) {
+        const { api, deliveries } = await executor({ pipelinePhones });
+        await api.runPipeline('pipe', 'a');
+        assert.deepEqual(deliveries[0].approver_phones, pipelinePhones.length ? pipelinePhones : ['919876543210']);
+    }
+});
+
+test('pipeline approval numbers are saved, validated, retained on unrelated edits, and cleared', async () => {
+    const tables = { content_pipelines: [] };
+    const db = database(tables);
+    const api = await load('../src/modules/pipelines/pipeline.service.js', { '../../config/supabase.js': { supabaseAdmin: db, supabase: db } });
+    const created = await api.createPipeline('a', 'user', { name: 'Review', autoPublish: false, approverPhones: '+91 98765 43210, +447700900123, 919876543210' });
+    assert.deepEqual(Array.from(created.approver_phones), ['919876543210', '447700900123']);
+    await api.updatePipeline(created.id, 'a', { name: 'Renamed' });
+    assert.equal(tables.content_pipelines[0].approver_phones.length, 2);
+    await assert.rejects(api.updatePipeline(created.id, 'a', { approverPhones: 'invalid123' }), /valid WhatsApp/);
+    assert.equal(tables.content_pipelines[0].approver_phones.length, 2);
+    await api.updatePipeline(created.id, 'a', { approver_phones: ['+447700900124'] });
+    assert.deepEqual(Array.from(tables.content_pipelines[0].approver_phones), ['447700900124']);
+    await api.updatePipeline(created.id, 'a', { approverPhones: '' });
+    assert.equal(tables.content_pipelines[0].approver_phones.length, 0);
 });
 
 test('reimport skips existing content and Posted source rows, preserves full briefs', async () => {

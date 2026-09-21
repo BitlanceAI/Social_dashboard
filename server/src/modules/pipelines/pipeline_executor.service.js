@@ -306,7 +306,8 @@ export const runPipeline = async (pipelineId, workspaceId) => {
     let scheduledPostId = null;
     let approvalDelivery = null;
     try {
-        const approverPhones = pipeline.auto_publish ? [] : await getDefaultApprovers(pipeline.workspace_id);
+        const approverPhones = pipeline.auto_publish ? [] : pipeline.approver_phones?.length
+            ? pipeline.approver_phones : await getDefaultApprovers(pipeline.workspace_id);
         if (pipeline.auto_publish) autoReservation = await reserveUsage(pipeline.user_id, pipeline.workspace_id, 'trial_auto_posts');
         generationReservation = await reserveUsage(pipeline.user_id, pipeline.workspace_id);
         // 3. Generate AI Caption
@@ -557,7 +558,7 @@ export const runPipeline = async (pipelineId, workspaceId) => {
 
         if (!pipeline.auto_publish) {
             approvalDelivery = !approverPhones.length
-                ? { sent: false, error: 'No default approvers configured. Review in Approval Queue or add default approvers.' }
+                ? { sent: false, error: 'No approval numbers configured. Add WhatsApp numbers in pipeline settings or workspace defaults, or review in Approval Queue.' }
                 : !isWhatsAppEnabled()
                     ? { sent: false, error: 'WhatsApp is not configured. Review this post in Approval Queue.' }
                     : await requestApproval({ ...postPayload, id: scheduledPostId }).catch(err => ({ sent: false, error: err.message }));
