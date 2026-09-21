@@ -12,17 +12,16 @@
  * and subscribe to the `messages` field.
  */
 
-import { env } from '../../config/env.js';
+import '../../config/env.js';
 
-import crypto from 'crypto';
 import express from 'express';
+import { verifyWhatsAppSignature } from './whatsapp.signature.js';
 import { authenticateUser } from '../../middleware/auth.js';
 import { isWhatsAppEnabled, APPROVE_PREFIX, REJECT_PREFIX } from './whatsapp.service.js';
 import { decideFromWhatsApp, handleTextFromWhatsApp } from '../approvals/approval.service.js';
 
 const router = express.Router();
 
-const META_APP_SECRET = process.env.META_APP_SECRET;
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN;
 
 // Known delivery-failure codes → plain-English hints for the logs. Delivery
@@ -35,20 +34,6 @@ const WA_ERROR_HINTS = {
     132001: 'template does not exist (or is not approved) for this WABA/language',
     132012: 'template parameter mismatch — header type or variable count differs from the approved template',
     132018: 'template parameter contains newlines/tabs or 4+ consecutive spaces',
-};
-
-const verifySignature = (req) => {
-    if (!META_APP_SECRET) {
-        if (env.nodeEnv === 'production') return false;
-        console.warn('[WhatsApp] META_APP_SECRET not set — accepting unsigned webhook (development only)');
-        return true;
-    }
-    const signature = req.headers['x-hub-signature-256'];
-    if (!signature || !req.rawBody) return false;
-    const expected = 'sha256=' + crypto.createHmac('sha256', META_APP_SECRET).update(req.rawBody).digest('hex');
-    const a = Buffer.from(signature);
-    const b = Buffer.from(expected);
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 
 router.get('/webhook', (req, res) => {
@@ -67,10 +52,12 @@ router.post('/webhook', async (req, res) => {
     // Meta needs a fast 200 or it retries; everything below is best-effort.
     res.sendStatus(200);
 
-    if (!verifySignature(req)) {
-        console.warn('[WhatsApp] Rejected webhook with a bad signature');
+    const verification = verifyWhatsAppSignature(req);
+    if (!verification.valid) {
+        console.warn(`[WhatsApp] Rejected webhook: ${verification.reason}`);
         return;
     }
+    if (verification.warning) console.warn(`[WhatsApp] ${verification.warning}`);
 
     try {
         for (const entry of req.body?.entry || []) {

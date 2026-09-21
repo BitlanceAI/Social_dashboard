@@ -3,7 +3,7 @@ import { protect } from '../../middleware/auth.js';
 import { requireAdmin } from './admin.middleware.js';
 import {
     getOverview, getUsers, createUser, getConnections,
-    getStorageSettings, updateStorageSettings, getStoragePurchases,
+    getStorageSettings, updateStorageSettings, getStoragePurchases, grantStorage,
     getPosts, getPushTokens, getHealth, notifyUser,
     getAdminPlans, updateAdminPlan, getAdminSubscriptions, markManualPayment,
 } from './admin.controller.js';
@@ -23,6 +23,7 @@ router.get('/connections', getConnections);
 router.get('/storage/settings', getStorageSettings);
 router.put('/storage/settings', updateStorageSettings);
 router.get('/storage/purchases', getStoragePurchases);
+router.post('/storage/grants', grantStorage);
 router.get('/posts', getPosts);
 router.get('/push-tokens', getPushTokens);
 router.get('/health', getHealth);

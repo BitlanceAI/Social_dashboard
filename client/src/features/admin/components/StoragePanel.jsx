@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { IndianRupee, Clock, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { fetchStorageSettings, updateStorageSettings, fetchStoragePurchases } from '../lib/adminApi';
+import { fetchStorageSettings, updateStorageSettings, fetchStoragePurchases, grantStorage } from '../lib/adminApi';
 import StatusChip from './StatusChip';
 
 const inputClass =
@@ -15,7 +15,7 @@ const fmtDate = (iso) =>
     iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
 
 // storage_purchases.status → StatusChip tone (paid reads as healthy teal)
-const CHIP_STATUS = { paid: 'active', created: 'pending', failed: 'failed' };
+const CHIP_STATUS = { paid: 'active', granted: 'active', created: 'pending', failed: 'failed' };
 
 /**
  * Admin Storage tab: the price users pay per GB per month, how long media
@@ -29,6 +29,27 @@ const StoragePanel = () => {
     const [purchases, setPurchases] = useState([]);
     const [saving, setSaving] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [grant, setGrant] = useState({ userId: '', gb: '10', months: '1' });
+    const [granting, setGranting] = useState(false);
+    const [grantResult, setGrantResult] = useState(null);
+
+    const handleGrant = async (event) => {
+        event.preventDefault();
+        if (granting) return;
+        setGranting(true);
+        setGrantResult(null);
+        try {
+            const result = await grantStorage({ userId: grant.userId.trim(), gb: Number(grant.gb), months: Number(grant.months) });
+            setGrantResult(result.grant);
+            setGrant(current => ({ ...current, userId: '' }));
+            toast.success('Storage granted');
+            await load();
+        } catch (err) {
+            toast.error(err.message || 'Could not grant storage');
+        } finally {
+            setGranting(false);
+        }
+    };
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -82,6 +103,29 @@ const StoragePanel = () => {
                 </div>
             )}
 
+            <form onSubmit={handleGrant} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                <h2 className="text-[15px] font-semibold">Grant storage</h2>
+                <p className="text-[13px] text-[var(--muted)] mt-1 mb-4">Give a user extra storage without payment. It starts immediately and adds to their existing storage.</p>
+                <fieldset disabled={granting} className="grid sm:grid-cols-3 gap-4">
+                    <label className="block sm:col-span-3">
+                        <span className="block text-xs text-[var(--muted)] mb-1.5">User ID</span>
+                        <input required value={grant.userId} onChange={e => setGrant({ ...grant, userId: e.target.value })} className={inputClass} placeholder="Paste the user's full UUID" autoComplete="off" />
+                    </label>
+                    <label className="block">
+                        <span className="block text-xs text-[var(--muted)] mb-1.5">Storage (GB)</span>
+                        <input type="number" min="1" max="1000" step="1" required value={grant.gb} onChange={e => setGrant({ ...grant, gb: e.target.value })} className={inputClass} />
+                    </label>
+                    <label className="block">
+                        <span className="block text-xs text-[var(--muted)] mb-1.5">Duration (months)</span>
+                        <input type="number" min="1" max="24" step="1" required value={grant.months} onChange={e => setGrant({ ...grant, months: e.target.value })} className={inputClass} />
+                    </label>
+                    <div className="flex items-end">
+                        <button type="submit" disabled={granting} className="btn-primary rounded-xl px-5 py-2 text-sm disabled:opacity-60">{granting ? 'Granting…' : 'Grant free storage'}</button>
+                    </div>
+                </fieldset>
+                {grantResult && <p role="status" className="mt-4 text-sm text-[var(--accent)] break-words">Granted {grantResult.gb} GB to {grantResult.user_id} until {fmtDate(grantResult.expires_at)}.</p>}
+            </form>
+
             {/* Settings */}
             <form onSubmit={handleSave} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
                 <h2 className="text-[15px] font-semibold mb-4">Pricing & retention</h2>
@@ -127,7 +171,7 @@ const StoragePanel = () => {
             {/* Purchases */}
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
                 <div className="flex items-center px-5 pt-5 pb-3">
-                    <h2 className="flex-1 text-[15px] font-semibold">Purchases</h2>
+                    <h2 className="flex-1 text-[15px] font-semibold">Purchases & grants</h2>
                     <button
                         onClick={load}
                         className="p-2 rounded-xl border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors"
@@ -162,7 +206,7 @@ const StoragePanel = () => {
                             {!loading && purchases.length === 0 && (
                                 <tr className="border-t border-[var(--border)]">
                                     <td colSpan={6} className="px-5 py-8 text-center text-sm text-[var(--muted)]">
-                                        No purchases yet.
+                                        No purchases or grants yet.
                                     </td>
                                 </tr>
                             )}

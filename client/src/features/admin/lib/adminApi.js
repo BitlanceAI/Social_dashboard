@@ -52,6 +52,7 @@ export const updateStorageSettings = ({ pricePerGbMonth, deleteAfterDays }) =>
     request('/storage/settings', { method: 'PUT', body: { pricePerGbMonth, deleteAfterDays } });
 
 export const fetchStoragePurchases = () => request('/storage/purchases');
+export const grantStorage = (body) => request('/storage/grants', { method: 'POST', body });
 
 export const fetchAdminPlans = () => request('/plans');
 export const updateAdminPlan = (planKey, patch) =>

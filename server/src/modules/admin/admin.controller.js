@@ -1,4 +1,5 @@
 import { validateManualPayment } from './manual-payment.js';
+import { createStorageGrant } from './storage-grant.js';
 import { subscriptionAccess } from '../billing/billing.policy.js';
 import { supabaseAdmin } from '../../config/supabase.js';
 import * as storageService from '../storage/storage.service.js';
@@ -408,7 +409,19 @@ export const updateStorageSettings = async (req, res) => {
     }
 };
 
-/** GET /api/admin/storage/purchases — latest purchases across all users. */
+/** POST /api/admin/storage/grants — free storage, restricted by requireAdmin. */
+export const grantStorage = async (req, res) => {
+    try {
+        const grant = await createStorageGrant(supabaseAdmin, req.user.id, req.body || {});
+        res.status(201).json({ success: true, grant });
+    } catch (err) {
+        console.error('[admin] storage grant failed:', err);
+        const status = [400, 404].includes(err.status) ? err.status : 500;
+        res.status(status).json({ success: false, error: status === 500 ? 'Could not grant storage' : err.message });
+    }
+};
+
+/** GET /api/admin/storage/purchases — latest purchases and grants across all users. */
 export const getStoragePurchases = async (req, res) => {
     try {
         const { data, error } = await supabaseAdmin

@@ -196,13 +196,12 @@ export const getEntitlement = async (userId) => {
             .from('storage_purchases')
             .select('id, gb, months, amount, currency, status, starts_at, expires_at, created_at')
             .eq('user_id', userId)
-            .order('created_at', { ascending: false })
-            .limit(20),
+            .order('created_at', { ascending: false }),
     ]);
     if (error) throw error;
 
     const now = Date.now();
-    const paid = (purchases || []).filter((p) => p.status === 'paid' && p.expires_at);
+    const paid = (purchases || []).filter((p) => ['paid', 'granted'].includes(p.status) && p.expires_at);
     const active = paid.filter((p) => new Date(p.expires_at).getTime() > now);
 
     // Lapsed with files still stored: the grace clock is running. Surfacing
@@ -223,7 +222,7 @@ export const getEntitlement = async (userId) => {
         expiredAt,
         purgeAt,
         deleteAfterDays: settings.delete_after_days,
-        purchases: purchases || [],
+        purchases: (purchases || []).slice(0, 20),
     };
 };
 
@@ -399,7 +398,7 @@ export const sweepExpiredStorage = async () => {
         const { data: paidRows, error: paidError } = await supabaseAdmin
             .from('storage_purchases')
             .select('id, user_id, expires_at, grace_notified_at')
-            .eq('status', 'paid')
+            .in('status', ['paid', 'granted'])
             .in('user_id', userIds);
         if (paidError) throw paidError;
 

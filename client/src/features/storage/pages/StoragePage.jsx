@@ -25,6 +25,7 @@ const fmtDate = (iso) =>
 
 const STATUS_STYLE = {
     paid: { background: 'var(--accent-muted)', color: 'var(--accent)' },
+    granted: { background: 'var(--accent-muted)', color: 'var(--accent)' },
     created: { background: 'var(--surface-2)', color: 'var(--muted)' },
     failed: { background: 'rgba(248, 113, 113, 0.1)', color: '#F87171' },
 };
@@ -263,7 +264,7 @@ const StoragePage = () => {
                 {/* History */}
                 {me?.purchases?.length > 0 && (
                     <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
-                        <h2 className="text-[15px] font-semibold px-5 pt-5 pb-3">Purchase history</h2>
+                        <h2 className="text-[15px] font-semibold px-5 pt-5 pb-3">Storage history</h2>
                         <div className="overflow-x-auto">
                             <table className="w-full text-left">
                                 <thead>

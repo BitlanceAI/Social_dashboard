@@ -139,6 +139,7 @@ PERPLEXITY_MODEL=             # optional; defaults to 'sonar'
 WHATSAPP_GLOBAL_TOKEN=        # WhatsApp Cloud API system-user token (post approvals). Token + phone id
 WHATSAPP_PHONE_ID=            #   both set = approval field shows in the scheduler; either missing = hidden
 WHATSAPP_VERIFY_TOKEN=        # webhook handshake secret; falls back to META_VERIFY_TOKEN
+WHATSAPP_APP_SECRET=          # WhatsApp Meta app's App Secret; falls back to META_APP_SECRET
 WHATSAPP_PLACEHOLDER_IMAGE_URL=  # header image for text-only posts (the template REQUIRES a media header)
 WHATSAPP_APPROVAL_TEMPLATE=   # optional; defaults to post_approval_utility (image header)
 WHATSAPP_APPROVAL_VIDEO_TEMPLATE=  # optional; defaults to post_approval_utility_video (video header)

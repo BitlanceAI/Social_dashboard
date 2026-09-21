@@ -53,6 +53,10 @@ META_APP_ID=1223947918763528
 META_APP_SECRET=<app secret>
 META_API_VERSION=v21.0
 
+# If WhatsApp uses a separate Meta app, use that app's App Secret here.
+# Otherwise the webhook falls back to META_APP_SECRET.
+WHATSAPP_APP_SECRET=<WhatsApp Meta app secret>
+
 # The callback lives on the API; the browser is sent back to the frontend
 META_REDIRECT_URI=https://api.yourdomain.com/api/meta/oauth/callback
 FRONTEND_URL=https://social-dashboard.vercel.app
@@ -65,6 +69,24 @@ ALLOWED_ORIGINS=https://social-dashboard.vercel.app
 # JSON full of quotes and braces. Mark it encrypted.
 FIREBASE_SERVICE_ACCOUNT_B64=<base64 blob>
 ```
+
+### Admin storage grants
+
+Apply `supabase/migrations/20260921120000_admin_storage_grants.sql` before
+deploying the admin storage grant feature. In Admin → Storage → Grant storage,
+enter an existing user's UUID, 1–1000 GB, and 1–24 months. Grants start immediately,
+add to existing capacity, and follow the normal expiry and retention policy.
+They require no Razorpay configuration or payment, and record the issuing admin.
+
+### WhatsApp webhook signatures
+
+For WhatsApp signature rejections, set `WHATSAPP_APP_SECRET` to the App Secret
+of the Meta app subscribed to `/api/whatsapp/webhook`, then restart/redeploy
+the backend. This is different from the access token and `WHATSAPP_VERIFY_TOKEN`
+(which only verifies the subscription handshake). Logs distinguish missing
+secrets, missing/malformed signature headers, missing raw bodies, and mismatches
+without exposing credentials or payloads. Rejected callbacks are acknowledged
+but ignored, so test with a fresh approval after correcting the configuration.
 
 ### Firebase credentials on DigitalOcean
 
