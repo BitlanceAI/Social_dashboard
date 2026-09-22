@@ -21,6 +21,7 @@
   --muted:        #777777;
   --muted-2:      #CCCCCC;
   color-scheme: light;
+  --signup-error: #b42318;
 }
 
 /* Dark — optional */
@@ -36,6 +37,7 @@
   --muted:        #555555;
   --muted-2:      #333333;
   color-scheme: dark;
+  --signup-error: #fda29b;
 }
 
 /* ── Base reset ───────────────────────────────────────────────────────────── */
