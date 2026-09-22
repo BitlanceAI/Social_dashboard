@@ -128,16 +128,19 @@ const getUsage = async (userId) => {
 
     if (wsIds.length === 0) return { accounts: 0, workspaces: 0, users: 0 };
 
-    const [metaRes, liRes, memberRes] = await Promise.all([
+    const [metaRes, liRes, memberRes, igRes] = await Promise.all([
         supabaseAdmin.from('meta_connections')
             .select('pages, selected_page_ids').in('workspace_id', wsIds).eq('is_active', true),
         supabaseAdmin.from('linkedin_connections')
             .select('id').in('workspace_id', wsIds).eq('is_active', true),
         supabaseAdmin.from('workspace_members')
             .select('user_id').in('workspace_id', wsIds),
+        supabaseAdmin.from('instagram_connections')
+            .select('id').in('workspace_id', wsIds).eq('is_active', true),
     ]);
 
     for (const result of [metaRes, liRes, memberRes]) if (result.error) throw result.error;
+    if (igRes.error && !['42P01', 'PGRST205'].includes(igRes.error.code)) throw igRes.error;
 
     // A "social account" = each selected Facebook Page, plus its linked
     // Instagram, plus each LinkedIn connection — mirrors the dashboard targets.
@@ -151,6 +154,7 @@ const getUsage = async (userId) => {
         accounts += selected.filter((p) => p.instagram_business_account).length;
     }
     accounts += (liRes.data || []).length;
+    accounts += (igRes.data || []).length;
 
     const uniqueMembers = new Set((memberRes.data || []).map((m) => m.user_id));
     const users = Math.max(0, uniqueMembers.size); // includes owner

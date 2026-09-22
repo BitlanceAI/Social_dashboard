@@ -5,10 +5,8 @@ import { platformMeta } from '@/features/meta/lib/providers';
 /**
  * "Add Profile" picker.
  *
- * One row per thing you can connect. Facebook and Instagram are the same
- * OAuth flow — Meta has no standalone Instagram login, and an Instagram
- * Business account is only reachable through its linked Page — so the
- * Instagram row says that outright rather than implying two integrations.
+ * Instagram Login connects a professional account directly. Facebook Login
+ * continues to connect Pages and any linked Instagram accounts.
  *
  * LinkedIn is split in two because the scope sets genuinely differ: a personal
  * profile is self-serve, a Company Page needs Community Management API
@@ -23,14 +21,14 @@ const OPTIONS = [
         platform: 'facebook',
         provider: 'meta',
         title: 'Facebook',
-        subtitle: 'Connect page or group',
+        subtitle: 'Connect a Facebook Page',
     },
     {
         key: 'instagram',
         platform: 'instagram',
-        provider: 'meta',
+        provider: 'instagram',
         title: 'Instagram',
-        subtitle: 'Connect via Facebook · Instagram Business',
+        subtitle: 'Connect directly · Business or Creator',
     },
     {
         key: 'linkedin-member',

@@ -19,6 +19,7 @@ const SocialProfilesPanel = ({
     metaScopes = null,
     instagramAccounts = [],
     linkedinConnection,
+    instagramConnection,
     postCounts = {},
     onAddProfile,
     onAssignPages,
@@ -83,6 +84,14 @@ const SocialProfilesPanel = ({
 
             {/* LinkedIn tokens last 60 days and this app cannot refresh them,
                 so an expiring connection has to be visible, not just logged. */}
+            {instagramConnection && !instagramConnection.isValid && (
+                <div className="rounded-2xl border border-amber-400/60 bg-amber-500/10 p-4 flex items-center justify-between gap-4">
+                    <p className="text-sm text-[var(--text)]">Instagram needs to be reconnected before you can publish.</p>
+                    <button onClick={onAddProfile} className="text-sm text-[var(--accent)]">Reconnect</button>
+                    <button onClick={() => onRemoveTarget({ provider: 'instagram', id: instagramConnection.account.id })}
+                        className="text-sm text-[var(--muted)]">Disconnect</button>
+                </div>
+            )}
             {expiry && (
                 <div className={`flex items-start gap-3 rounded-2xl border p-4 ${expiry.expired
                     ? 'border-red-400/60 bg-red-500/10'
@@ -222,6 +231,7 @@ const SocialProfilesPanel = ({
                                     onClick={() => onRemoveTarget(target)}
                                     title={target.provider === 'linkedin'
                                         ? 'Disconnect LinkedIn'
+                                        : target.provider === 'instagram' ? 'Disconnect Instagram'
                                         : 'Remove this Page'}
                                     className="shrink-0 p-3 rounded-xl border border-[var(--border)] text-[var(--muted)] hover:border-red-400 hover:text-red-500 transition-colors"
                                 >

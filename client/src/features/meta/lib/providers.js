@@ -56,6 +56,7 @@ export const charLimitFor = (platforms = []) => (platforms.length
 
 export const API_PREFIX = {
     meta: '/api/meta',
+    instagram: '/api/instagram',
     linkedin: '/api/linkedin',
 };
 

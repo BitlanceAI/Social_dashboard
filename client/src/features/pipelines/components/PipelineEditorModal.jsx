@@ -81,9 +81,15 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
         return Promise.all([
           fetch(`${API_BASE_URL}/api/meta/connection`, { headers }).then((r) => r.json()).catch(() => ({})),
           fetch(`${API_BASE_URL}/api/linkedin/connection`, { headers }).then((r) => r.json()).catch(() => ({})),
+          fetch(`${API_BASE_URL}/api/instagram/connection`, { headers }).then((r) => r.json()).catch(() => ({})),
         ]);
-      }).then(([metaData, liData]) => {
+      }).then(([metaData, liData, igData]) => {
         const list = [];
+        if (igData?.connected && igData.isValid) {
+          list.push({ key: igData.account.id, provider: 'instagram', pageId: igData.account.id,
+            targetPlatforms: ['instagram'], label: `Instagram — @${igData.account.username}`,
+            subtitle: 'Instagram · connected directly' });
+        }
 
         // Meta Pages & Instagram
         if (metaData?.connected && Array.isArray(metaData.pages)) {
@@ -253,6 +259,7 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
                   >
                     <option value="linkedin">LinkedIn</option>
                     <option value="meta">Facebook / Instagram</option>
+                    <option value="instagram">Instagram (direct)</option>
                   </select>
                   <p className="text-[11px] text-amber-500">
                     ⚠️ Connect your accounts under Social Profiles to select specific pages.

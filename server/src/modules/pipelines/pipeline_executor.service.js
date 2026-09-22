@@ -18,6 +18,8 @@ import '../../config/env.js';
 import { supabaseAdmin, supabase } from '../../config/supabase.js';
 import MetaService from '../meta/meta.service.js';
 import LinkedInService from '../linkedin/linkedin.service.js';
+import { instagramClient } from '../instagram/instagram.connection.js';
+import { instagramTargetId } from '../instagram/instagram.service.js';
 import { decryptData } from '../../shared/utils/encryption.js';
 import sharp from 'sharp';
 import { getDefaultApprovers, requestApproval } from '../approvals/approval.service.js';
@@ -345,6 +347,7 @@ export const runPipeline = async (pipelineId, workspaceId) => {
 
         let activeLiConn = null;
         let activeMetaConn = null;
+        let activeIgConn = null;
         let linkedinConnectionId = null;
         let metaConnectionId = null;
         let targetPageId = pipeline.page_id;
@@ -365,6 +368,18 @@ export const runPipeline = async (pipelineId, workspaceId) => {
             if (!targetPageId || targetPageId === 'pipeline_auto_post') {
                 targetPageId = liConn.author_urn;
             }
+        } else if (provider === 'instagram') {
+            const { data: igConn, error } = await db.from('instagram_connections').select('*')
+                .eq('workspace_id', pipeline.workspace_id).eq('is_active', true).maybeSingle();
+            if (error || !igConn) throw new Error('Connect Instagram under Social Profiles first.');
+            activeIgConn = igConn;
+            const expectedTarget = instagramTargetId(igConn.instagram_user_id);
+            if (targetPageId && targetPageId !== 'pipeline_auto_post' && targetPageId !== expectedTarget) {
+                throw new Error('The selected Instagram account is no longer connected.');
+            }
+            targetPageId = expectedTarget;
+            if (targetPlatforms.length !== 1 || targetPlatforms[0] !== 'instagram') throw new Error('Direct Instagram pipelines must target Instagram only.');
+            if (!mediaUrls.length || fullText.length > 2200) throw new Error('Instagram requires media and a caption of at most 2,200 characters.');
         } else {
             const { data: metaConn } = await db
                 .from('meta_connections')
@@ -412,6 +427,7 @@ export const runPipeline = async (pipelineId, workspaceId) => {
         }
 
         let resolvedPageName = pipeline.name;
+        if (activeIgConn) resolvedPageName = `@${activeIgConn.username}`;
         if (provider === 'meta' && activeMetaConn) {
             const pageObj = (activeMetaConn.pages || []).find((p) => String(p.id) === String(targetPageId));
             if (pageObj?.name) {
@@ -427,6 +443,7 @@ export const runPipeline = async (pipelineId, workspaceId) => {
             provider,
             ...(linkedinConnectionId ? { linkedin_connection_id: linkedinConnectionId } : {}),
             ...(metaConnectionId ? { meta_connection_id: metaConnectionId } : {}),
+            ...(activeIgConn ? { instagram_connection_id: activeIgConn.id } : {}),
             page_id: targetPageId,
             page_name: resolvedPageName,
             platforms: targetPlatforms,
@@ -475,6 +492,19 @@ export const runPipeline = async (pipelineId, workspaceId) => {
                         .eq('id', scheduledPostId);
                     throw new Error(`LinkedIn publish error: ${res.error}`);
                 }
+            } else if (provider === 'instagram' && activeIgConn) {
+                const service = await instagramClient(db, activeIgConn);
+                publishAttempted = true;
+                const result = await service.publishPost(activeIgConn.instagram_user_id, { caption: fullText, mediaUrls });
+                const { error: saveError } = await db.from('scheduled_posts').update({
+                    status: result.success ? 'published' : 'failed',
+                    published_at: result.success ? new Date().toISOString() : null,
+                    meta_post_id: result.data?.id || null,
+                    error_message: result.success ? null : result.error,
+                    publish_results: { instagram: result.success ? { success: true, postId: result.data.id } : { success: false, error: result.error } },
+                }).eq('id', scheduledPostId);
+                if (saveError) throw saveError;
+                if (!result.success) throw new Error(`Instagram publish error: ${result.error}`);
             } else if (provider === 'meta' && activeMetaConn) {
                 const decryptedToken = decryptData(activeMetaConn.access_token);
                 const metaService = new MetaService(decryptedToken);

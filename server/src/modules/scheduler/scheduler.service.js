@@ -18,6 +18,8 @@ import '../../config/env.js';
 import { createClient } from '@supabase/supabase-js';
 import MetaService from '../meta/meta.service.js';
 import LinkedInService from '../linkedin/linkedin.service.js';
+import { instagramClient } from '../instagram/instagram.connection.js';
+import { instagramTargetId } from '../instagram/instagram.service.js';
 import { decryptData } from '../../shared/utils/encryption.js';
 import { sendToWorkspace } from '../push/push.service.js';
 import { sweepExpiredStorage } from '../storage/storage.service.js';
@@ -151,6 +153,7 @@ export const startPostScheduler = () => {
         // Piggybacks on the same reachability guard as the publish pass.
         if (tickCount++ % EXPIRY_SWEEP_EVERY_TICKS === 0) {
             sweepExpiringLinkedInTokens();
+            sweepInstagramTokens();
             // Purges libraries whose paid storage lapsed past the grace window.
             sweepExpiredStorage();
             // Deletes generated flyer images older than the retention window.
@@ -451,6 +454,42 @@ const sweepExpiringLinkedInTokens = async () => {
     }
 };
 
+const publishViaInstagram = async (post) => {
+    const { data: connection, error } = await supabase.from('instagram_connections').select('*')
+        .eq('id', post.instagram_connection_id).eq('workspace_id', post.workspace_id).maybeSingle();
+    if (error) throw new Error('Could not load Instagram connection.');
+    if (!connection || post.page_id !== instagramTargetId(connection.instagram_user_id)) {
+        throw new Error('The Instagram account for this post is no longer connected.');
+    }
+    const service = await instagramClient(supabase, connection);
+    const result = await service.publishPost(connection.instagram_user_id, { caption: post.content, mediaUrls: post.media_urls });
+    if (result.code === 190 || result.status === 401) {
+        await supabase.from('instagram_connections').update({ is_active: false }).eq('id', connection.id);
+    }
+    return {
+        results: { instagram: result.success ? { success: true, postId: result.data.id } : { success: false, error: result.error } },
+        publishedIds: result.success ? [result.data.id] : [], failures: result.success ? [] : [result.error],
+    };
+};
+
+const sweepInstagramTokens = async () => {
+    try {
+        const { data, error } = await supabase.from('instagram_connections').select('*').eq('is_active', true)
+            .gt('token_expires_at', new Date().toISOString())
+            .lt('token_expires_at', new Date(Date.now() + 7 * 86400000).toISOString());
+        if (error) {
+            if (!isMissingSchema(error)) console.error('[Scheduler] Instagram renewal query failed:', error.code);
+            return;
+        }
+        for (const connection of data || []) {
+            await instagramClient(supabase, connection).catch(() => {
+                console.warn('[Scheduler] Instagram renewal failed for connection', connection.id);
+            });
+        }
+        await supabase.from('instagram_oauth_states').delete().lt('expires_at', new Date().toISOString());
+    } catch { console.warn('[Scheduler] Instagram renewal unavailable.'); }
+};
+
 const publishScheduledPost = async (post) => {
     const ownerId = await billingOwner(post.user_id, post.workspace_id);
     if (!subscriptionAccess(await ensureSubscription(ownerId)).active) return;
@@ -474,9 +513,9 @@ const publishScheduledPost = async (post) => {
         // deploy and migration could still be null.
         const provider = post.provider || 'meta';
 
-        const { results, publishedIds, failures } = provider === 'linkedin'
-            ? await publishViaLinkedIn(post)
-            : await publishViaMeta(post, platforms);
+        const { results, publishedIds, failures } = provider === 'instagram'
+            ? await publishViaInstagram(post)
+            : provider === 'linkedin' ? await publishViaLinkedIn(post) : await publishViaMeta(post, platforms);
 
         if (publishedIds.length === 0) {
             throw new Error(failures.join('; ') || 'Unknown API error');

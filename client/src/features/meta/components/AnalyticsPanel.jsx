@@ -87,7 +87,7 @@ const ChartTooltip = ({ active, payload, label }) => {
 const axisTick = { fill: '#777777', fontSize: 11 };
 const gridStroke = { stroke: '#777777', strokeOpacity: 0.15 };
 
-const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn = false }) => {
+const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn = false, hasInstagram = false }) => {
     const [liveRows, setLiveRows] = useState(null);      // live FB/IG posts
     const [feedErrors, setFeedErrors] = useState([]);    // per-feed read failures
     const [linkedinRows, setLinkedinRows] = useState([]); // app-tracked LinkedIn
@@ -110,7 +110,7 @@ const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn =
             setLoading(true);
             setError(null);
             try {
-                const [metaRes, liRes] = await Promise.all([
+                const [metaRes, liRes, igRes] = await Promise.all([
                     hasMeta
                         ? fetch(`${API_BASE_URL}/api/meta/posts/history?limit=50`, { headers: authHeaders() })
                             .then((r) => r.json()).catch((e) => ({ success: false, error: e.message }))
@@ -119,16 +119,16 @@ const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn =
                         ? fetch(`${API_BASE_URL}/api/linkedin/posts/metrics?limit=20`, { headers: authHeaders() })
                             .then((r) => r.json()).catch(() => ({ success: false }))
                         : Promise.resolve({ success: true, posts: [] }),
+                    hasInstagram
+                        ? fetch(`${API_BASE_URL}/api/instagram/posts/history`, { headers: authHeaders() })
+                            .then((r) => r.json()).catch(() => ({ success: false, error: 'Instagram history unavailable.' }))
+                        : Promise.resolve({ success: true, posts: [] }),
                 ]);
                 if (cancelled) return;
 
-                if (metaRes.success) {
-                    setLiveRows(metaRes.posts || []);
-                    setFeedErrors(metaRes.feedErrors || []);
-                } else {
-                    setLiveRows([]);
-                    setError(metaRes.error || 'Could not load engagement from Meta');
-                }
+                setLiveRows([...new Map([...(metaRes.posts || []), ...(igRes.posts || [])].map((p) => [p.id, p])).values()]);
+                setFeedErrors([...(metaRes.feedErrors || []), ...(igRes.feedErrors || [])]);
+                if (!metaRes.success || !igRes.success) setError(metaRes.error || igRes.error || 'Could not load engagement.');
 
                 // LinkedIn metrics rows carry per-platform metrics; flatten to
                 // the live-row shape so one table renders both.
@@ -158,7 +158,7 @@ const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn =
         })();
 
         return () => { cancelled = true; };
-    }, [hasMeta, hasLinkedIn, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [hasMeta, hasLinkedIn, hasInstagram, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const allRows = useMemo(
         () => [...(liveRows || []), ...linkedinRows]

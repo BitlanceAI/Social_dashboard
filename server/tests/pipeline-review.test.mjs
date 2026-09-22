@@ -55,6 +55,8 @@ async function executor({ phones = ['919876543210'], pipelinePhones, enabled = t
         '../../config/env.js': {}, '../../config/supabase.js': { supabaseAdmin: db, supabase: db },
         '../billing/billing.service.js': { reserveUsage: async () => null, releaseUsage: async () => {} },
         '../meta/meta.service.js': { default: noPublish }, '../linkedin/linkedin.service.js': { default: noPublish },
+        '../instagram/instagram.connection.js': { instagramClient: async () => { throw new Error('Must not publish before approval'); } },
+        '../instagram/instagram.service.js': { instagramTargetId: id => `instagram:${id}` },
         '../../shared/utils/encryption.js': { decryptData: () => { throw new Error('Unexpected decryption'); } },
         sharp: { default: () => {} },
         '../approvals/approval.service.js': { getDefaultApprovers: async workspace => { assert.equal(workspace, 'a'); return phones; },

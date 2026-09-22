@@ -202,7 +202,7 @@ const BulkUploadModal = ({ isOpen, onClose, targets = [], authHeaders, onDone })
 
         for (let n = 0; n < valid.length; n += 1) {
             const r = valid[n];
-            const provider = providerOf(r.platforms);
+            const provider = target?.provider || providerOf(r.platforms);
             try {
                 const res = await fetch(`${apiBase}${prefixFor(provider)}/posts/schedule`, {
                     method: 'POST',

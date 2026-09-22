@@ -91,6 +91,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
     // dashboard is usable with either one on its own.
     const [connection, setConnection] = useState(null);          // Meta
     const [liConnection, setLiConnection] = useState(null);      // LinkedIn
+    const [igConnection, setIgConnection] = useState(null);      // Direct Instagram Login
     const [showBulk, setShowBulk] = useState(false);             // bulk CSV modal
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -144,7 +145,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
     const updateScheduleForm = (updates) => setScheduleFormData(prev => ({ ...prev, ...updates }));
 
     // Either provider on its own is enough to use the dashboard.
-    const isConnected = Boolean(connection) || Boolean(liConnection);
+    const isConnected = Boolean(connection) || Boolean(liConnection) || Boolean(igConnection?.isValid);
 
     /**
      * Every account this user can publish to, flattened into one shape so the
@@ -155,6 +156,12 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
      * `instagram_business_account` checks previously scattered through the UI.
      */
     const rawTargets = [
+        ...(igConnection?.isValid ? [{
+            id: igConnection.account.id, name: `@${igConnection.account.username}`,
+            subtitle: 'Instagram · connected directly', provider: 'instagram',
+            avatarUrl: igConnection.account.avatarUrl, platforms: ['instagram'],
+            igUsername: igConnection.account.username,
+        }] : []),
         ...(connection?.pages || []).map((page) => ({
             id: String(page.id),
             name: page.name,
@@ -272,6 +279,8 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
         if (oauthSuccess && token && session?.access_token && !oauthProcessedRef.current) {
             oauthProcessedRef.current = true;
             handleOAuthComplete(token, session.access_token);
+        } else if (searchParams.get('instagram_ticket') && session?.access_token) {
+            completeInstagramLogin(searchParams.get('instagram_ticket'));
         } else if (searchParams.get('linkedin_connected') && session?.access_token) {
             // The LinkedIn callback already wrote the connection server-side --
             // there is no token in this URL to hand back. Just re-read it.
@@ -280,6 +289,8 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
             window.history.replaceState({}, '', '/socialdashboad');
         } else if (error) {
             toast.error(`Connection failed: ${error}`);
+            sessionStorage.removeItem('instagramLogin');
+            window.history.replaceState({}, '', '/socialdashboad');
         }
     }, [searchParams, session]);
 
@@ -375,9 +386,36 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
         }
     };
 
-    /** Both providers, then the shared publishing queue. */
+    const checkInstagramConnection = async () => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/instagram/connection`, { headers: getAuthHeaders() });
+            const data = await response.json();
+            if (response.ok) setIgConnection(data.connected ? data : null);
+        } catch { /* Other providers remain usable if this provider is unavailable. */ }
+    };
+
+    const completeInstagramLogin = async (ticket) => {
+        if (processedOAuthTokens.has(ticket)) return;
+        processedOAuthTokens.add(ticket);
+        window.history.replaceState({}, '', '/socialdashboad');
+        try {
+            const pending = JSON.parse(sessionStorage.getItem('instagramLogin') || 'null');
+            sessionStorage.removeItem('instagramLogin');
+            if (!pending?.verifier) throw new Error('Instagram login belongs to another browser session. Please connect again.');
+            const response = await fetch(`${API_BASE_URL}/api/instagram/oauth/complete`, {
+                method: 'POST', headers: { ...getAuthHeaders(), ...(pending.workspaceId ? { 'x-workspace-id': pending.workspaceId } : {}) },
+                body: JSON.stringify({ ticket, verifier: pending.verifier }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Instagram connection failed.');
+            toast.success('Instagram connected');
+            await checkInstagramConnection();
+        } catch (error) { toast.error(error.message); }
+    };
+
+    /** Connections, then the shared publishing queue. */
     const loadAllConnections = async () => {
-        await Promise.all([checkConnection(), checkLinkedInConnection()]);
+        await Promise.all([checkConnection(), checkLinkedInConnection(), checkInstagramConnection()]);
         await loadScheduledPosts();
     };
 
@@ -387,7 +425,10 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
      */
     const handleAuthError = (status, data, provider = 'meta') => {
         if (status === 401 && data?.code === 'TOKEN_EXPIRED') {
-            if (provider === 'linkedin') {
+            if (provider === 'instagram') {
+                setIgConnection((prev) => prev ? { ...prev, isValid: false } : null);
+                toast.error('Instagram session expired. Please reconnect.');
+            } else if (provider === 'linkedin') {
                 setLiConnection(null);
                 toast.error('LinkedIn session expired. Please reconnect.');
             } else {
@@ -416,15 +457,17 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
     const loadPlatformHistory = async () => {
         setHistoryLoading(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/api/meta/posts/history`, {
-                headers: getAuthHeaders()
-            });
-            const data = await response.json();
-            if (handleAuthError(response.status, data)) return;
-            if (data.success) {
-                setPlatformHistory(data.posts || []);
-                setHistoryFeedErrors(data.feedErrors || []);
-            }
+            const providers = [connection && 'meta', igConnection?.isValid && 'instagram'].filter(Boolean);
+            const feeds = await Promise.all(providers.map(async (provider) => {
+                try {
+                    const response = await fetch(`${API_BASE_URL}${prefixFor(provider)}/posts/history`, { headers: getAuthHeaders() });
+                    const data = await response.json();
+                    handleAuthError(response.status, data, provider);
+                    return data.success ? data : { posts: [], feedErrors: [{ platform: provider, error: data.error || 'Could not load posts.' }] };
+                } catch { return { posts: [], feedErrors: [{ platform: provider, error: 'Could not load posts.' }] }; }
+            }));
+            setPlatformHistory([...new Map(feeds.flatMap((f) => f.posts || []).map((p) => [p.id, p])).values()]);
+            setHistoryFeedErrors(feeds.flatMap((f) => f.feedErrors || []));
         } catch (error) {
             console.error('Failed to load platform history:', error);
         } finally {
@@ -436,11 +479,11 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
         if (activeTab === 'history') {
             // Post History merges live Meta posts with our tracked scheduled/
             // failed rows, so both sources load when the tab opens.
-            if (connection && platformHistory === null && !historyLoading) loadPlatformHistory();
+            if ((connection || igConnection?.isValid) && platformHistory === null && !historyLoading) loadPlatformHistory();
             loadScheduledPosts();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeTab, connection, liConnection]);
+    }, [activeTab, connection, liConnection, igConnection]);
 
     const loadScheduledPosts = async () => {
         try {
@@ -568,9 +611,13 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
             // profile, 'organization' to also request Company Page posting.
             const query = target ? `?target=${encodeURIComponent(target)}` : '';
 
-            const response = await fetch(`${API_BASE_URL}${prefixFor(provider)}/oauth/url${query}`, {
-                headers: getAuthHeaders()
-            });
+            let options = { headers: getAuthHeaders() };
+            if (provider === 'instagram') {
+                const verifier = Array.from(crypto.getRandomValues(new Uint8Array(32)), (v) => v.toString(16).padStart(2, '0')).join('');
+                sessionStorage.setItem('instagramLogin', JSON.stringify({ verifier, workspaceId: activeWorkspaceId }));
+                options = { ...options, method: 'POST', body: JSON.stringify({ verifier }) };
+            }
+            const response = await fetch(`${API_BASE_URL}${prefixFor(provider)}/oauth/url${query}`, options);
             const data = await response.json();
 
             if (data.success && data.url) {
@@ -649,8 +696,8 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
      * -- disconnecting Meta wholesale over one Page would be a nasty surprise.
      */
     const handleRemoveTarget = async (target) => {
-        if (target.provider === 'linkedin') {
-            return handleDisconnect('linkedin');
+        if (target.provider === 'linkedin' || target.provider === 'instagram') {
+            return handleDisconnect(target.provider);
         }
 
         const remaining = targets
@@ -685,7 +732,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
     };
 
     const handleDisconnect = async (provider = 'meta') => {
-        const label = provider === 'linkedin' ? 'LinkedIn' : 'Meta';
+        const label = provider === 'instagram' ? 'Instagram' : provider === 'linkedin' ? 'LinkedIn' : 'Meta';
         if (!confirm(`Are you sure you want to disconnect your ${label} account?`)) return;
 
         try {
@@ -703,7 +750,9 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
 
             toast.success(`${label} account disconnected`);
             if (provider === 'linkedin') setLiConnection(null);
+            else if (provider === 'instagram') setIgConnection(null);
             else setConnection(null);
+            setPlatformHistory(null);
             // Rows for the other provider are still valid, so re-read the queue
             // rather than clearing it outright.
             await loadScheduledPosts();
@@ -723,6 +772,9 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                 liConnection && fetch(`${API_BASE_URL}/api/linkedin/refresh-accounts`, {
                     method: 'POST',
                     headers: getAuthHeaders()
+                }),
+                igConnection && fetch(`${API_BASE_URL}/api/instagram/refresh-accounts`, {
+                    method: 'POST', headers: getAuthHeaders(),
                 }),
             ].filter(Boolean));
             await loadAllConnections();
@@ -753,7 +805,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
 
         // One post targets one provider; validateStep(1) blocks a mixed
         // selection, so the first platform decides which API this goes to.
-        const provider = providerOf(scheduleFormData.platforms);
+        const provider = targetById(scheduleFormData.pageId)?.provider || providerOf(scheduleFormData.platforms);
         const prefix = prefixFor(provider);
 
         setSubmitting(true);
@@ -815,6 +867,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
             });
 
             const data = await response.json();
+            if (handleAuthError(response.status, data, provider)) return;
             if (data.success) {
                 if (publishNow) {
                     // Publish-now reports per-network, so surface partial failures
@@ -909,7 +962,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
     const handleDeleteScheduledPost = async (post) => {
         // A published post is live on Meta; a pending one only exists here.
         const isPublished = post?.status === 'published';
-        const network = post?.provider === 'linkedin' ? 'LinkedIn' : 'Facebook';
+        const network = post?.provider === 'instagram' ? 'Instagram' : post?.provider === 'linkedin' ? 'LinkedIn' : 'Facebook';
         const confirmText = isPublished
             ? `Delete this post from ${network}? This cannot be undone.`
             : 'Cancel this scheduled post?';
@@ -1050,8 +1103,8 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
             return [];
         }
 
-        const permalink = p.publish_results?.facebook?.permalink
-            || (p.meta_post_id ? `https://facebook.com/${p.meta_post_id}` : null);
+        const permalink = p.publish_results?.instagram?.permalink || p.publish_results?.facebook?.permalink
+            || (platforms.includes('facebook') && p.meta_post_id ? `https://facebook.com/${p.meta_post_id}` : null);
 
         return [{
             key: `db-${p.id}`,
@@ -1150,6 +1203,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                                 } : null}
                                 instagramAccounts={connection?.instagramAccounts || []}
                                 linkedinConnection={liConnection}
+                                instagramConnection={igConnection}
                                 postCounts={postCounts}
                                 onAddProfile={() => setShowConnectModal(true)}
                                 onAssignPages={connection?.availablePages?.length && workspaces.length > 1
@@ -1433,6 +1487,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                             <AnalyticsPanel
                                 hasMeta={Boolean(connection)}
                                 hasLinkedIn={Boolean(liConnection)}
+                                hasInstagram={Boolean(igConnection?.isValid)}
                                 posts={scheduledPosts}
                                 authHeaders={getAuthHeaders}
                             />
