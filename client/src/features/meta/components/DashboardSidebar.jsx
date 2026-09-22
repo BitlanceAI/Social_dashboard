@@ -42,6 +42,9 @@ const NAV = [
     { id: 'analytics', label: 'Analytics', short: 'Stats', icon: BarChart3, needsConnection: true },
 ];
 
+const INSIGHTS_NAV = NAV.filter(({ id }) => id === 'history' || id === 'analytics');
+const PRIMARY_NAV = NAV.filter(({ id }) => id !== 'history' && id !== 'analytics');
+
 const itemClass = (disabled, isActive) =>
     `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left ${
         disabled
@@ -63,6 +66,7 @@ const DashboardSidebar = ({
     const { user, signOut } = useAuth();
     const navigate = useNavigate();
     const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+    const [insightsOpen, setInsightsOpen] = useState(active === 'history' || active === 'analytics');
     const profileMenuRef = useRef(null);
 
     useEffect(() => {
@@ -112,7 +116,7 @@ const DashboardSidebar = ({
 
             {/* Navigation */}
             <nav className="space-y-1">
-                {NAV.map(({ id, label, icon: Icon, needsConnection }) => {
+                {PRIMARY_NAV.map(({ id, label, icon: Icon, needsConnection }) => {
                     const disabled = needsConnection && !isConnected;
                     const isActive = active === id && !disabled;
                     const count = counts[id];
@@ -134,6 +138,49 @@ const DashboardSidebar = ({
                         </button>
                     );
                 })}
+
+                <div>
+                    <button
+                        type="button"
+                        onClick={() => { if (isConnected) setInsightsOpen((open) => !open); }}
+                        disabled={!isConnected}
+                        aria-expanded={insightsOpen}
+                        aria-controls="history-analytics-menu"
+                        className={itemClass(!isConnected, active === 'history' || active === 'analytics')}
+                    >
+                        <BarChart3 className="h-4 w-4 shrink-0" />
+                        <span className="flex-1 text-sm">History &amp; Analytics</span>
+                        {isConnected && publishedCount > 0 && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-[var(--surface-2)] text-[var(--muted)]">
+                                {publishedCount}
+                            </span>
+                        )}
+                        <ChevronUp className={`h-3.5 w-3.5 shrink-0 transition-transform ${insightsOpen ? '' : 'rotate-180'}`} />
+                    </button>
+
+                    {isConnected && insightsOpen && (
+                        <div id="history-analytics-menu" className="mt-1 ml-5 pl-3 border-l border-[var(--border)] space-y-1">
+                            {INSIGHTS_NAV.map(({ id, label, icon: Icon }) => {
+                                const isActive = active === id;
+                                return (
+                                    <button
+                                        key={id}
+                                        type="button"
+                                        onClick={() => onNavigate(id)}
+                                        aria-current={isActive ? 'page' : undefined}
+                                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors ${isActive
+                                            ? 'bg-[var(--accent-muted)] text-[var(--accent)]'
+                                            : 'text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--text)]'
+                                        }`}
+                                    >
+                                        {React.createElement(Icon, { className: 'h-3.5 w-3.5 shrink-0' })}
+                                        <span className="text-sm">{label}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
             </nav>
 
             {/* Account menu */}
