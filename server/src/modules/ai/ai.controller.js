@@ -6,7 +6,7 @@ const fail = (res, err, fallback) => {
     res.status(err.status || 500).json({ success: false, error: err.status ? err.message : fallback });
 };
 
-/** POST /api/ai/caption */
+/** POST /api/ai/caption — generate a caption from a text topic or an imageUrl */
 export const generateCaption = async (req, res) => {
     try {
         res.json({ success: true, ...(await withGenerationUsage(req.user.id, req.workspaceId, () => svc.generateCaption(req.body || {}))) });
@@ -15,5 +15,10 @@ export const generateCaption = async (req, res) => {
 
 /** GET /api/ai/status — whether AI writing is available (for the UI to hide the button). */
 export const status = async (_req, res) => {
-    res.json({ success: true, configured: svc.isPerplexityConfigured() });
+    res.json({
+        success: true,
+        configured: svc.isPerplexityConfigured(),
+        visionConfigured: svc.isVisionConfigured(),
+    });
 };
+

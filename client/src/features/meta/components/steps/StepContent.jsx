@@ -41,6 +41,7 @@ const StepContent = ({
                                 platforms={platforms}
                                 hasContent={Boolean(content?.trim())}
                                 onCaption={onContentChange}
+                                imageUrl={mediaUrls?.[0] || undefined}
                             />
                         </div>
                         <textarea

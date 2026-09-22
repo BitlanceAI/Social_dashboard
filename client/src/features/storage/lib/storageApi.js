@@ -47,6 +47,15 @@ export const fetchMedia = (workspaceId) => request('/media', { workspaceId });
 
 export const deleteMedia = (id) => request(`/media/${id}`, { method: 'DELETE' });
 
+/**
+ * Quick-schedule a media-library file as a post.
+ * Payload: { targetId, provider, platforms, mediaUrl, content, scheduledTime,
+ *            approverPhones, timezone }
+ */
+export const quickScheduleMedia = (payload, workspaceId) =>
+    request('/quick-schedule', { method: 'POST', body: payload, workspaceId });
+
+
 /** Multipart upload — bypasses the JSON wrapper but keeps the auth shape. */
 export const uploadMedia = async (files, workspaceId) => {
     const { data: { session } } = await supabase.auth.getSession();
