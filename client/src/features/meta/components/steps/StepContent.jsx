@@ -21,6 +21,7 @@ const StepContent = ({
     // Facebook allows 63,206 characters, Instagram 2,200, LinkedIn 3,000 --
     // show whichever selected network is strictest.
     const charLimit = charLimitFor(platforms);
+    const isVideo = mediaFiles?.[0]?.type?.startsWith('video/') || mediaUrls?.[0]?.match(/\.(mp4|mov|webm|ogg)$/i);
 
     return (
         <div className="space-y-6">
@@ -110,12 +111,23 @@ const StepContent = ({
                         {/* Media Preview — show the whole image (no crop), as the
                             network does; cap height so tall flyers stay readable. */}
                         {mediaUrls[0] && (
-                            <div className="bg-[var(--surface)] border-y border-[var(--border)] flex justify-center">
-                                <img
-                                    src={mediaUrls[0]}
-                                    alt="Preview"
-                                    className="w-full max-h-[460px] object-contain"
-                                />
+                            <div className="bg-[var(--surface)] border-y border-[var(--border)] flex justify-center bg-black/5">
+                                {isVideo ? (
+                                    <video
+                                        src={mediaUrls[0]}
+                                        controls
+                                        autoPlay
+                                        muted
+                                        loop
+                                        className="w-full max-h-[460px] object-contain"
+                                    />
+                                ) : (
+                                    <img
+                                        src={mediaUrls[0]}
+                                        alt="Preview"
+                                        className="w-full max-h-[460px] object-contain"
+                                    />
+                                )}
                             </div>
                         )}
 
