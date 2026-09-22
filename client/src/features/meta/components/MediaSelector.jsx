@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { UploadCloud, Trash2, PlusCircle } from 'lucide-react';
+import { UploadCloud, Trash2, PlusCircle, Image, Images } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MediaLibrary } from '@/features/storage';
 
@@ -15,9 +15,20 @@ const MediaSelector = ({
     onUpdate
 }) => {
     const [uploadMode, setUploadMode] = useState('file'); // 'file' | 'url' | 'library'
+    const [libraryPickMode, setLibraryPickMode] = useState('post');
 
     // Import a stored file: its public URL rides along like a pasted URL.
     const pickFromLibrary = (item) => {
+        if (libraryPickMode === 'post') {
+            mediaUrls.filter((url) => url.startsWith('blob:')).forEach((url) => URL.revokeObjectURL(url));
+            onUpdate({ mediaFiles: [], mediaUrls: [item.url] });
+            toast.success(`Selected ${item.file_name}`);
+            return;
+        }
+        if (mediaUrls.filter(Boolean).length >= 10) {
+            toast.error('A carousel can contain up to 10 items');
+            return;
+        }
         if (mediaUrls.includes(item.url)) {
             toast('Already added');
             return;
@@ -41,7 +52,14 @@ const MediaSelector = ({
         const newFiles = [...mediaFiles];
         const newUrls = [...mediaUrls];
         newFiles.splice(idx, 1);
-        newUrls.splice(idx, 1);
+        const blobIndexes = newUrls
+            .map((url, urlIdx) => url.startsWith('blob:') ? urlIdx : -1)
+            .filter((urlIdx) => urlIdx >= 0);
+        const blobIndex = blobIndexes[idx];
+        if (blobIndex !== undefined) {
+            URL.revokeObjectURL(newUrls[blobIndex]);
+            newUrls.splice(blobIndex, 1);
+        }
         onUpdate({ mediaFiles: newFiles, mediaUrls: newUrls });
     };
 
@@ -89,7 +107,10 @@ const MediaSelector = ({
                     Media URL
                 </button>
                 <button
-                    onClick={() => setUploadMode('library')}
+                    onClick={() => {
+                        setUploadMode('library');
+                        setLibraryPickMode(mediaUrls.length > 1 ? 'carousel' : 'post');
+                    }}
                     className={`py-3 text-xs transition-all ${uploadMode === 'library'
                             ? 'bg-[var(--accent)] text-[var(--bg)] font-bold shadow-[2px_2px_0_0_var(--border)] -translate-y-0.5 rounded-xl'
                             : 'bg-transparent text-[var(--muted)] hover:text-[var(--text)] border border-transparent hover:border-[var(--border)] rounded-xl'
@@ -154,7 +175,38 @@ const MediaSelector = ({
 
             {/* Library Mode — stored media, click to import */}
             {uploadMode === 'library' && (
-                <MediaLibrary compact onPick={pickFromLibrary} />
+                <div className="space-y-3">
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1">
+                        <div className="grid grid-cols-2 gap-1">
+                            <button
+                                type="button"
+                                onClick={() => setLibraryPickMode('post')}
+                                aria-pressed={libraryPickMode === 'post'}
+                                className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-semibold transition-colors ${libraryPickMode === 'post'
+                                    ? 'bg-[var(--accent)] text-[var(--bg)]'
+                                    : 'text-[var(--muted)] hover:bg-[var(--bg)] hover:text-[var(--text)]'}`}
+                            >
+                                <Image className="h-4 w-4" /> Single post
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setLibraryPickMode('carousel')}
+                                aria-pressed={libraryPickMode === 'carousel'}
+                                className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-semibold transition-colors ${libraryPickMode === 'carousel'
+                                    ? 'bg-[var(--accent)] text-[var(--bg)]'
+                                    : 'text-[var(--muted)] hover:bg-[var(--bg)] hover:text-[var(--text)]'}`}
+                            >
+                                <Images className="h-4 w-4" /> Carousel
+                            </button>
+                        </div>
+                        <p className="px-3 py-2 text-[11px] text-[var(--muted)]">
+                            {libraryPickMode === 'post'
+                                ? 'Choose one item for this post. A new choice replaces the current media.'
+                                : 'Choose multiple items. Each choice is added to the carousel.'}
+                        </p>
+                    </div>
+                    <MediaLibrary compact onPick={pickFromLibrary} />
+                </div>
             )}
 
             {/* URL Mode */}

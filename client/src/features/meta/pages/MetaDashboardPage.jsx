@@ -129,7 +129,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
         linkUrl: '',
         hashtags: '',
         scheduledTime: '',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timezone: 'Asia/Kolkata',
         approverPhones: '', // comma-separated WhatsApp numbers; empty = no approval step
     });
 
@@ -782,14 +782,12 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
 
                 if (!uploadData.success) throw new Error(uploadData.error || 'Upload failed');
 
-                // Use uploaded URLs
-                finalMediaUrls = uploadData.urls;
+                // Preserve media selected from the Library or pasted as URLs,
+                // then append the newly uploaded files. Blob URLs are previews
+                // only and were filtered out above.
+                finalMediaUrls = [...finalMediaUrls, ...uploadData.urls];
             }
 
-            // Convert local scheduled time to UTC for storage
-            // The input `scheduleFormData.scheduledTime` is in local time (e.g. "2026-02-07T15:35")
-            // We create a Date object which defaults to browser's timezone (IST)
-            // Then toISOString() converts it to UTC (e.g. "2026-02-07T10:05:00.000Z")
             const endpoint = `${prefix}${publishNow ? '/posts/publish' : '/posts/schedule'}`;
 
             const payload = publishNow
@@ -802,9 +800,11 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                 }
                 : {
                     ...scheduleFormData,
-                    // scheduledTime is local (e.g. "2026-02-07T15:35"); send UTC
-                    scheduledTime: new Date(scheduleFormData.scheduledTime).toISOString(),
+                    // The picker is always IST, regardless of the device timezone.
+                    // Store the equivalent instant so the scheduler fires correctly.
+                    scheduledTime: new Date(`${scheduleFormData.scheduledTime}:00+05:30`).toISOString(),
                     originalLocalTime: scheduleFormData.scheduledTime,
+                    timezone: 'Asia/Kolkata',
                     mediaUrls: finalMediaUrls
                 };
 
@@ -837,6 +837,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                     if (data.warning) toast(data.warning, { icon: '⚠️', duration: 10000 });
                 }
                 setShowScheduleModal(false);
+                localStorage.removeItem(`post-draft:${activeWorkspaceId}:${publishMode}`);
                 setScheduleStep(1);
                 setScheduleFormData({
                     pageId: '',
@@ -847,7 +848,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                     linkUrl: '',
                     hashtags: '',
                     scheduledTime: '',
-                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    timezone: 'Asia/Kolkata',
                     approverPhones: '',
                 });
                 await loadScheduledPosts();
@@ -969,7 +970,12 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                 return true;
             }
             case 2: {
-                const mediaCount = scheduleFormData.mediaUrls.length + scheduleFormData.mediaFiles.length;
+                const remoteMedia = scheduleFormData.mediaUrls
+                    .filter((url) => url.trim() !== '' && !url.startsWith('blob:'));
+                const mediaCount = remoteMedia.length + scheduleFormData.mediaFiles.length;
+                const videoExtensions = /\.(mp4|mov|m4v|avi|mkv|webm)(?:[?#]|$)/i;
+                const hasVideo = remoteMedia.some((url) => videoExtensions.test(url))
+                    || scheduleFormData.mediaFiles.some((file) => file.type.startsWith('video/'));
 
                 if (!scheduleFormData.content && mediaCount === 0) {
                     return 'Please add content or media';
@@ -992,11 +998,19 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                     return 'LinkedIn posts currently support one image or video';
                 }
 
+                if (scheduleFormData.platforms.includes('instagram') && mediaCount > 10) {
+                    return 'Instagram carousels support up to 10 images or videos';
+                }
+
+                if (scheduleFormData.platforms.includes('facebook') && mediaCount > 1 && hasVideo) {
+                    return 'Facebook multi-media posts currently support images only; publish videos one at a time';
+                }
+
                 return true;
             }
             case 3: {
                 if (!scheduleFormData.scheduledTime) return 'Please select a schedule time';
-                const when = new Date(scheduleFormData.scheduledTime);
+                const when = new Date(`${scheduleFormData.scheduledTime}:00+05:30`);
                 if (Number.isNaN(when.getTime())) return 'That date does not look valid';
                 // The picker's min only constrains the widget, not typed input
                 if (when.getTime() <= Date.now()) return 'Pick a time in the future';
@@ -1080,6 +1094,110 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
         && (historyPlatform === 'all' || it.platforms.includes(historyPlatform))
         && (historyRange === 'all' || (it.when && new Date(it.when).getTime() >= rangeCutoff)));
 
+    const emptyScheduleForm = () => ({
+        pageId: '',
+        platforms: ['facebook'],
+        content: '',
+        mediaUrls: [],
+        mediaFiles: [],
+        linkUrl: '',
+        hashtags: '',
+        scheduledTime: '',
+        timezone: 'Asia/Kolkata',
+        approverPhones: '',
+    });
+    const draftKey = (mode) => `post-draft:${activeWorkspaceId}:${mode}`;
+    const saveComposerDraft = () => {
+        const persistentMedia = scheduleFormData.mediaUrls.filter((url) => url && !url.startsWith('blob:'));
+        localStorage.setItem(draftKey(publishMode), JSON.stringify({
+            formData: { ...scheduleFormData, mediaUrls: persistentMedia, mediaFiles: [] },
+            step: scheduleStep,
+        }));
+        setShowScheduleModal(false);
+        toast.success(scheduleFormData.mediaFiles.length
+            ? 'Draft saved. Uploaded files must be selected again when you resume.'
+            : 'Draft saved');
+    };
+    const discardComposer = () => {
+        localStorage.removeItem(draftKey(publishMode));
+        scheduleFormData.mediaUrls
+            .filter((url) => url.startsWith('blob:'))
+            .forEach((url) => URL.revokeObjectURL(url));
+        setScheduleFormData(emptyScheduleForm());
+        setScheduleStep(1);
+        setShowScheduleModal(false);
+        toast.success('Draft discarded');
+    };
+
+    const schedulePostWorkspace = (
+        <SchedulePostModal
+            inline
+            mode={publishMode}
+            isSubmitting={submitting}
+            isOpen={showScheduleModal}
+            onSaveDraft={saveComposerDraft}
+            onDiscard={discardComposer}
+            currentStep={scheduleStep}
+            setCurrentStep={setScheduleStep}
+            onSubmit={handleSchedulePost}
+            onValidate={validateStep}
+        >
+            {scheduleStep === 1 && (
+                <StepAccount
+                    targets={targets}
+                    selectedTargetId={scheduleFormData.pageId}
+                    platforms={scheduleFormData.platforms}
+                    onSelect={(targetId) => {
+                        const target = targetById(targetId);
+                        const kept = scheduleFormData.platforms
+                            .filter((pl) => target?.platforms.includes(pl));
+                        updateScheduleForm({
+                            pageId: targetId,
+                            platforms: kept.length ? kept : [target?.platforms[0] ?? 'facebook'],
+                        });
+                    }}
+                    onPlatformsChange={(platforms) => updateScheduleForm({ platforms })}
+                />
+            )}
+
+            {scheduleStep === 2 && (
+                <StepContent
+                    platforms={scheduleFormData.platforms}
+                    account={targetById(scheduleFormData.pageId)}
+                    content={scheduleFormData.content}
+                    linkUrl={scheduleFormData.linkUrl}
+                    mediaUrls={scheduleFormData.mediaUrls}
+                    mediaFiles={scheduleFormData.mediaFiles}
+                    onContentChange={(content) => updateScheduleForm({ content })}
+                    onLinkChange={(linkUrl) => updateScheduleForm({ linkUrl })}
+                    onMediaUpdate={(updates) => updateScheduleForm(updates)}
+                />
+            )}
+
+            {scheduleStep === 3 && (
+                <StepSchedule
+                    scheduledTime={scheduleFormData.scheduledTime}
+                    onScheduleChange={(scheduledTime) => updateScheduleForm({ scheduledTime })}
+                    approvalEnabled={approvalConfig.enabled}
+                    savedApprovers={approvalConfig.savedPhones}
+                    savingApprovers={savingApprovers}
+                    reuseApprovers={reuseApprovers}
+                    onReuseApproversChange={setReuseApprovers}
+                    onSaveApprovers={saveApprovalNumbers}
+                    approverPhones={scheduleFormData.approverPhones}
+                    onApproverChange={(approverPhones) => { ++approverEditVersion.current; updateScheduleForm({ approverPhones }); }}
+                />
+            )}
+
+            {scheduleStep === 4 && (
+                <StepReview
+                    formData={scheduleFormData}
+                    pages={connection?.pages || []}
+                />
+            )}
+        </SchedulePostModal>
+    );
+
     return (
         <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
 
@@ -1108,7 +1226,7 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                         </div>
                     </div>
 
-                    <main className="flex-1 min-w-0 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-10 py-6 sm:py-10 pb-32 lg:pb-16">
+                    <main className={`flex-1 min-w-0 mx-auto w-full px-4 sm:px-6 lg:px-10 py-6 sm:py-10 pb-32 lg:pb-16 ${activeTab === 'create' && showScheduleModal ? 'max-w-7xl' : 'max-w-5xl'}`}>
 
                         {/* Desktop: the sidebar carries nav, so the bell gets a slim
                     utility row at the top of the content column. */}
@@ -1375,38 +1493,55 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
 
                         {/* Create a Post tab */}
                         {activeTab === 'create' && (
-                            <CreatePostHub
-                                isConnected={isConnected}
-                                onConnect={() => setActiveTab('profiles')}
-                                onSelect={(mode) => {
-                                    if (mode === 'pipeline') {
-                                        navigate('/pipelines');
-                                        return;
-                                    }
-                                    if (mode === 'template') {
-                                        setOccasionContext(null);
+                            showScheduleModal ? schedulePostWorkspace : (
+                                <CreatePostHub
+                                    isConnected={isConnected}
+                                    onConnect={() => setActiveTab('profiles')}
+                                    onSelect={(mode) => {
+                                        if (mode === 'pipeline') {
+                                            navigate('/pipelines');
+                                            return;
+                                        }
+                                        if (mode === 'template') {
+                                            setOccasionContext(null);
+                                            setShowTemplates(true);
+                                            return;
+                                        }
+                                        if (mode === 'bulk') {
+                                            setShowBulk(true);
+                                            return;
+                                        }
+                                        const savedDraft = localStorage.getItem(draftKey(mode));
+                                        if (savedDraft) {
+                                            try {
+                                                const parsed = JSON.parse(savedDraft);
+                                                setScheduleFormData({ ...emptyScheduleForm(), ...parsed.formData, mediaFiles: [] });
+                                                setScheduleStep(parsed.step || 1);
+                                                toast.success('Draft restored');
+                                            } catch {
+                                                localStorage.removeItem(draftKey(mode));
+                                                setScheduleFormData(emptyScheduleForm());
+                                                setScheduleStep(1);
+                                            }
+                                        } else {
+                                            setScheduleFormData(emptyScheduleForm());
+                                            setScheduleStep(1);
+                                        }
+                                        setPublishMode(mode);
+                                        setShowScheduleModal(true);
+                                    }}
+                                    onPickOccasion={(occasion) => {
+                                        // Open the template gallery filtered to this occasion,
+                                        // carrying its date so the post pre-schedules to it.
+                                        setOccasionContext({
+                                            niche: 'occasion',
+                                            search: occasion.name,
+                                            date: occasion.date,
+                                        });
                                         setShowTemplates(true);
-                                        return;
-                                    }
-                                    if (mode === 'bulk') {
-                                        setShowBulk(true);
-                                        return;
-                                    }
-                                    setPublishMode(mode);
-                                    setScheduleStep(1);
-                                    setShowScheduleModal(true);
-                                }}
-                                onPickOccasion={(occasion) => {
-                                    // Open the template gallery filtered to this occasion,
-                                    // carrying its date so the post pre-schedules to it.
-                                    setOccasionContext({
-                                        niche: 'occasion',
-                                        search: occasion.name,
-                                        date: occasion.date,
-                                    });
-                                    setShowTemplates(true);
-                                }}
-                            />
+                                    }}
+                                />
+                            )
                         )}
 
                         {/* Media Library tab — files stored in the user's paid storage */}
@@ -1518,73 +1653,6 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                 saving={savingPages}
             />
 
-            {/* Schedule Post Modal - Component-Based */}
-            <SchedulePostModal
-                mode={publishMode}
-                isSubmitting={submitting}
-                isOpen={showScheduleModal}
-                onClose={() => setShowScheduleModal(false)}
-                currentStep={scheduleStep}
-                setCurrentStep={setScheduleStep}
-                onSubmit={handleSchedulePost}
-                onValidate={validateStep}
-            >
-                {scheduleStep === 1 && (
-                    <StepAccount
-                        targets={targets}
-                        selectedTargetId={scheduleFormData.pageId}
-                        platforms={scheduleFormData.platforms}
-                        onSelect={(targetId) => {
-                            const target = targetById(targetId);
-                            // Keep whatever the previous selection still supports;
-                            // a Page with no linked Instagram, or any LinkedIn
-                            // target, will not offer 'instagram'.
-                            const kept = scheduleFormData.platforms
-                                .filter((pl) => target?.platforms.includes(pl));
-                            updateScheduleForm({
-                                pageId: targetId,
-                                platforms: kept.length ? kept : [target?.platforms[0] ?? 'facebook'],
-                            });
-                        }}
-                        onPlatformsChange={(platforms) => updateScheduleForm({ platforms })}
-                    />
-                )}
-
-                {scheduleStep === 2 && (
-                    <StepContent
-                        platforms={scheduleFormData.platforms}
-                        content={scheduleFormData.content}
-                        linkUrl={scheduleFormData.linkUrl}
-                        mediaUrls={scheduleFormData.mediaUrls}
-                        mediaFiles={scheduleFormData.mediaFiles}
-                        onContentChange={(content) => updateScheduleForm({ content })}
-                        onLinkChange={(linkUrl) => updateScheduleForm({ linkUrl })}
-                        onMediaUpdate={(updates) => updateScheduleForm(updates)}
-                    />
-                )}
-
-                {scheduleStep === 3 && (
-                    <StepSchedule
-                        scheduledTime={scheduleFormData.scheduledTime}
-                        onScheduleChange={(scheduledTime) => updateScheduleForm({ scheduledTime })}
-                        approvalEnabled={approvalConfig.enabled}
-                        savedApprovers={approvalConfig.savedPhones}
-                        savingApprovers={savingApprovers}
-                        reuseApprovers={reuseApprovers}
-                        onReuseApproversChange={setReuseApprovers}
-                        onSaveApprovers={saveApprovalNumbers}
-                        approverPhones={scheduleFormData.approverPhones}
-                        onApproverChange={(approverPhones) => { ++approverEditVersion.current; updateScheduleForm({ approverPhones }); }}
-                    />
-                )}
-
-                {scheduleStep === 5 && (
-                    <StepReview
-                        formData={scheduleFormData}
-                        pages={connection?.pages || []}
-                    />
-                )}
-            </SchedulePostModal>
         </div>
     );
 };

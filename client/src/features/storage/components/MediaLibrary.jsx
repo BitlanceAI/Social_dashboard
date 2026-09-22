@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { UploadCloud, Trash2, Film } from 'lucide-react';
+import { UploadCloud, Trash2, Film, ChevronLeft, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useWorkspace } from '@/features/workspace';
 import { fetchMedia, uploadMedia, deleteMedia, fmtBytes } from '../lib/storageApi';
@@ -19,6 +19,7 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
     const [uploading, setUploading] = useState(false);
     const [isDragOver, setIsDragOver] = useState(false);
     const [previewItem, setPreviewItem] = useState(null);
+    const [compactPage, setCompactPage] = useState(0);
     const inputRef = useRef(null);
 
     const load = useCallback(async () => {
@@ -33,7 +34,10 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
         }
     }, [activeWorkspaceId]);
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        const timer = window.setTimeout(() => { void load(); }, 0);
+        return () => window.clearTimeout(timer);
+    }, [load]);
 
     const processUpload = async (files) => {
         if (!files.length || uploading) return;
@@ -42,6 +46,7 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
             await uploadMedia(files, activeWorkspaceId);
             toast.success(`${files.length} file${files.length === 1 ? '' : 's'} added`);
             await load();
+            setCompactPage(0);
             onChanged?.();
         } catch (err) {
             toast.error(err.message || 'Upload failed');
@@ -84,6 +89,13 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
         }
     };
 
+    const pageSize = 3;
+    const compactPageCount = Math.max(1, Math.ceil(media.length / pageSize));
+    const safeCompactPage = Math.min(compactPage, compactPageCount - 1);
+    const visibleMedia = compact
+        ? media.slice(safeCompactPage * pageSize, safeCompactPage * pageSize + pageSize)
+        : media;
+
     return (
         <div>
             <input
@@ -122,7 +134,7 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
                 </div>
             ) : (
                 <div className={`grid gap-3 ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'}`}>
-                    {media.map((item) => {
+                    {visibleMedia.map((item) => {
                         const isVideo = item.mime_type?.startsWith('video/');
                         return (
                             <div
@@ -153,6 +165,34 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
                             </div>
                         );
                     })}
+                </div>
+            )}
+
+            {compact && media.length > pageSize && (
+                <div className="mt-3 flex items-center justify-between gap-3">
+                    <span className="text-[11px] text-[var(--muted)]">
+                        {safeCompactPage * pageSize + 1}–{Math.min((safeCompactPage + 1) * pageSize, media.length)} of {media.length}
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setCompactPage((page) => Math.max(0, page - 1))}
+                            disabled={safeCompactPage === 0}
+                            aria-label="Show newer media"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-35"
+                        >
+                            <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setCompactPage((page) => Math.min(compactPageCount - 1, page + 1))}
+                            disabled={safeCompactPage >= compactPageCount - 1}
+                            aria-label="Show older media"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-35"
+                        >
+                            <ChevronRight className="h-4 w-4" />
+                        </button>
+                    </div>
                 </div>
             )}
 

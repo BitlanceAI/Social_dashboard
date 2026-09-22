@@ -1,13 +1,24 @@
-import React from 'react';
-import { CheckCircle2, Eye, Calendar, Users, Image, FileText, MessageCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { CheckCircle2, Eye, Calendar, Users, Image, FileText, MessageCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 
 /**
  * Step 5: Review & Confirm
  * Final review before scheduling
  */
 const StepReview = ({ formData, pages }) => {
+    const [previewIndex, setPreviewIndex] = useState(0);
     const selectedPage = pages?.find(p => p.id === formData.pageId);
-    const hasMedia = formData.mediaUrls?.[0];
+    const visibleMedia = (formData.mediaUrls || []).filter(Boolean);
+    const hasMedia = visibleMedia.length > 0;
+    const safePreviewIndex = Math.min(previewIndex, Math.max(0, visibleMedia.length - 1));
+    const previewMediaUrl = visibleMedia[safePreviewIndex];
+    const previewBlobIndex = previewMediaUrl?.startsWith('blob:')
+        ? formData.mediaUrls.slice(0, formData.mediaUrls.indexOf(previewMediaUrl) + 1).filter((url) => url.startsWith('blob:')).length - 1
+        : -1;
+    const previewMediaIsVideo = Boolean(previewMediaUrl) && (
+        /\.(mp4|mov|m4v|avi|mkv|webm)(?:[?#]|$)/i.test(previewMediaUrl)
+        || (previewBlobIndex >= 0 && formData.mediaFiles?.[previewBlobIndex]?.type.startsWith('video/'))
+    );
     const scheduledDate = formData.scheduledTime
         ? new Date(formData.scheduledTime)
         : null;
@@ -79,7 +90,9 @@ const StepReview = ({ formData, pages }) => {
                             <div className="overflow-hidden">
                                 <p className="text-xs text-[var(--muted)] mb-1">Post type</p>
                                 <p className="font-bold text-[var(--text)] tracking-tight mt-1 truncate">
-                                    {hasMedia ? 'MEDIA_BLOCK' : 'TEXT_BLOCK'}
+                                    {hasMedia
+                                        ? visibleMedia.length > 1 ? `CAROUSEL (${visibleMedia.length})` : previewMediaIsVideo ? 'VIDEO' : 'IMAGE'
+                                        : 'TEXT'}
                                 </p>
                             </div>
                         </div>
@@ -137,12 +150,46 @@ const StepReview = ({ formData, pages }) => {
 
                     {/* Media — full image, no crop (matches how the network renders it) */}
                     {hasMedia && (
-                        <div className="bg-[var(--surface)] border-y border-[var(--border)] flex justify-center shrink-0">
-                            <img
-                                src={formData.mediaUrls[0]}
-                                alt="Post media"
-                                className="w-full max-h-[460px] object-contain"
-                            />
+                        <div className="relative bg-[var(--surface)] border-y border-[var(--border)] flex justify-center shrink-0">
+                            {previewMediaIsVideo ? (
+                                <video
+                                    src={previewMediaUrl}
+                                    controls
+                                    preload="metadata"
+                                    className="w-full max-h-[360px] object-contain"
+                                />
+                            ) : (
+                                <img
+                                    src={previewMediaUrl}
+                                    alt={`Post media ${safePreviewIndex + 1}`}
+                                    className="w-full max-h-[360px] object-contain"
+                                />
+                            )}
+                            {visibleMedia.length > 1 && (
+                                <span className="absolute right-3 top-3 rounded-full bg-black/75 px-2.5 py-1 text-[11px] font-semibold text-white">
+                                    {safePreviewIndex + 1} / {visibleMedia.length}
+                                </span>
+                            )}
+                            {visibleMedia.length > 1 && (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => setPreviewIndex((index) => (index - 1 + visibleMedia.length) % visibleMedia.length)}
+                                        aria-label="Show previous carousel item"
+                                        className="absolute left-3 top-1/2 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/70 text-white shadow-lg hover:bg-black/85 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                                    >
+                                        <ChevronLeft className="h-5 w-5" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setPreviewIndex((index) => (index + 1) % visibleMedia.length)}
+                                        aria-label="Show next carousel item"
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/70 text-white shadow-lg hover:bg-black/85 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                                    >
+                                        <ChevronRight className="h-5 w-5" />
+                                    </button>
+                                </>
+                            )}
                         </div>
                     )}
 
@@ -156,14 +203,16 @@ const StepReview = ({ formData, pages }) => {
             </div>
 
             {/* Confirmation Notice */}
-            <div className="p-6 bg-[var(--accent)]/10 border border-[var(--accent)] flex items-start gap-4 shadow-xl">
-                <CheckCircle2 className="h-6 w-6 text-[var(--accent)] shrink-0 mt-0.5 animate-pulse" />
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 flex items-start gap-4">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/10">
+                    <CheckCircle2 className="h-5 w-5 text-[var(--accent)]" />
+                </div>
                 <div>
-                    <p className="text-[var(--accent)] font-bold text-[12px] md:text-sm mb-1">
-                        Ready
+                    <p className="font-semibold text-[var(--text)] text-sm mb-1">
+                        Ready to schedule
                     </p>
-                    <p className="text-[var(--accent)] text-xs">
-                        &gt; AUTHORIZE "SCHEDULE POST" TO FINALIZE TRANSACTION.
+                    <p className="text-[var(--muted)] text-xs leading-relaxed">
+                        Review the account, content, and publish time above. When everything looks right, schedule your post.
                     </p>
                 </div>
             </div>

@@ -352,6 +352,12 @@ class MetaService {
 
         // Multiple images → upload each unpublished, then attach to one feed post
         if (media.length > 1) {
+            if (media.some(isVideoUrl)) {
+                return {
+                    success: false,
+                    error: 'Facebook multi-media posts currently support images only; publish videos one at a time.'
+                };
+            }
             const attached = [];
             for (const url of media) {
                 const uploaded = await service.request('POST', `/${pageId}/photos`, {
@@ -425,6 +431,12 @@ class MetaService {
         // Multiple images → upload each as a temporary unpublished photo, then a
         // single scheduled feed post that attaches them.
         if (media.length > 1) {
+            if (media.some(isVideoUrl)) {
+                return {
+                    success: false,
+                    error: 'Facebook multi-media posts currently support images only; schedule videos one at a time.'
+                };
+            }
             const attached = [];
             for (const url of media) {
                 const uploaded = await service.request('POST', `/${pageId}/photos`, {
