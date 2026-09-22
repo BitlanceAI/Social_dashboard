@@ -116,10 +116,6 @@ const DashboardSidebar = ({
 
             {/* Footer */}
             <div className="mt-auto pt-6 space-y-1">
-                <Link to="/pipelines" className={footerLink}>
-                    <Bot className="h-4 w-4 shrink-0 text-cyan-400" />
-                    AI Pipelines
-                </Link>
                 <button onClick={toggleTheme} className={footerLink}>
                     {theme === 'dark' ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
                     {theme === 'dark' ? 'Light mode' : 'Dark mode'}
