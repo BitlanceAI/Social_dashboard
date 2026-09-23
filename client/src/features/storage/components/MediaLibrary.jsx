@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { UploadCloud, Trash2, Film, ChevronLeft, ChevronRight } from 'lucide-react';
+import { UploadCloud, Trash2, Film, CalendarClock, ChevronLeft, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useWorkspace } from '@/features/workspace';
 import { fetchMedia, uploadMedia, deleteMedia, fmtBytes } from '../lib/storageApi';
+import QuickScheduleModal from './QuickScheduleModal';
 
 /**
  * The user's stored files: upload into the purchased quota, delete, and —
@@ -19,6 +20,7 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
     const [uploading, setUploading] = useState(false);
     const [isDragOver, setIsDragOver] = useState(false);
     const [previewItem, setPreviewItem] = useState(null);
+    const [scheduleItem, setScheduleItem] = useState(null);
     const [compactPage, setCompactPage] = useState(0);
     const inputRef = useRef(null);
 
@@ -153,15 +155,27 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
                                     <span className="block text-[11px] truncate">{item.file_name}</span>
                                     <span className="block text-[10px] font-mono text-[var(--muted)]">{fmtBytes(item.size_bytes)}</span>
                                 </div>
-                                {!onPick && (
+                                {/* Action buttons (shown on hover) */}
+                                <div className="absolute top-1.5 right-1.5 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                    {/* Quick Schedule */}
                                     <button
-                                        onClick={(e) => { e.stopPropagation(); handleDelete(item); }}
-                                        className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-[var(--bg)]/80 text-[var(--muted)] opacity-0 group-hover:opacity-100 hover:text-[#F87171] transition-all"
-                                        title="Delete"
+                                        onClick={(e) => { e.stopPropagation(); setScheduleItem(item); }}
+                                        className="p-1.5 rounded-lg bg-[var(--bg)]/80 text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
+                                        title="Quick Schedule"
                                     >
-                                        <Trash2 className="h-3.5 w-3.5" />
+                                        <CalendarClock className="h-3.5 w-3.5" />
                                     </button>
-                                )}
+
+                                    {!onPick && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); handleDelete(item); }}
+                                            className="p-1.5 rounded-lg bg-[var(--bg)]/80 text-[var(--muted)] hover:text-[#F87171] transition-all"
+                                            title="Delete"
+                                        >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         );
                     })}
@@ -226,6 +240,18 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
                         )}
                     </div>
                 </div>
+            )}
+
+            {/* Quick Schedule Modal */}
+            {scheduleItem && (
+                <QuickScheduleModal
+                    item={scheduleItem}
+                    onClose={() => setScheduleItem(null)}
+                    onSuccess={() => {
+                        setScheduleItem(null);
+                        onChanged?.();
+                    }}
+                />
             )}
         </div>
     );

@@ -1,19 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Loader2, X } from 'lucide-react';
+import { Sparkles, Loader2, X, Image as ImageIcon, Type } from 'lucide-react';
+
 import toast from 'react-hot-toast';
 import { fetchAiStatus, generateCaption } from '@/features/meta/lib/captionApi';
 
 const TONES = ['friendly', 'professional', 'playful', 'inspirational', 'bold', 'informative'];
 
 /**
- * AI caption writer for the composer. Collapsed to a single "Write with AI"
- * button; expands to a small prompt panel. On success it hands the generated
- * caption back via onCaption so the composer's textarea is filled. Hides itself
- * entirely when the server has no PERPLEXITY_API_KEY configured.
+ * AI caption writer for the composer.
+ *
+ * Supports two modes:
+ *   • Text prompt  — user types what the post is about (Perplexity)
+ *   • Image        — AI analyses the attached image (OpenAI Vision)
+ *
+ * Props:
+ *   platforms  – ['facebook','instagram',…]
+ *   hasContent – whether the composer already has a caption
+ *   onCaption  – (string) => void
+ *   imageUrl   – URL of an already-selected image for vision mode
  */
-const CaptionAssistant = ({ platforms = [], hasContent = false, onCaption }) => {
-    const [available, setAvailable] = useState(false);
+const CaptionAssistant = ({ platforms = [], hasContent = false, onCaption, imageUrl }) => {
+    const [aiStatus, setAiStatus] = useState({ textAi: false, imageAi: false });
     const [open, setOpen] = useState(false);
+    const [mode, setMode] = useState('text'); // 'image' | 'text'
     const [topic, setTopic] = useState('');
     const [tone, setTone] = useState('friendly');
     const [language, setLanguage] = useState('en');
@@ -23,19 +32,31 @@ const CaptionAssistant = ({ platforms = [], hasContent = false, onCaption }) => 
 
     useEffect(() => {
         let cancelled = false;
-        fetchAiStatus().then((ok) => { if (!cancelled) setAvailable(ok); });
+        fetchAiStatus().then((status) => {
+            if (!cancelled) {
+                setAiStatus(status);
+                if (imageUrl && status.imageAi) setMode('image');
+            }
+        });
         return () => { cancelled = true; };
-    }, []);
+    }, [imageUrl]);
 
-    if (!available) return null;
+    useEffect(() => {
+        if (imageUrl && aiStatus.imageAi) setMode('image');
+    }, [imageUrl, aiStatus.imageAi]);
+
+    const anyAvailable = aiStatus.textAi || aiStatus.imageAi;
+    if (!anyAvailable) return null;
 
     const write = async () => {
         if (loading) return;
-        if (!topic.trim()) { toast.error('Tell the AI what the post is about'); return; }
+        const useImage = mode === 'image' && imageUrl && aiStatus.imageAi;
+        if (!useImage && !topic.trim()) { toast.error('Tell the AI what the post is about'); return; }
         setLoading(true);
         try {
             const caption = await generateCaption({
-                topic, platforms, tone, language, includeHashtags, includeEmojis,
+                platforms, tone, language, includeHashtags, includeEmojis,
+                ...(useImage ? { imageUrl, topic: topic.trim() || undefined } : { topic }),
             });
             onCaption(caption);
             toast.success('Caption written');
@@ -60,6 +81,9 @@ const CaptionAssistant = ({ platforms = [], hasContent = false, onCaption }) => 
         );
     }
 
+    const canUseImage = aiStatus.imageAi && Boolean(imageUrl);
+    const canUseText = aiStatus.textAi;
+
     return (
         <div className="rounded-xl border border-[var(--accent)] bg-[var(--accent-muted)] p-3 space-y-3">
             <div className="flex items-center justify-between">
@@ -71,13 +95,50 @@ const CaptionAssistant = ({ platforms = [], hasContent = false, onCaption }) => 
                 </button>
             </div>
 
-            <input
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); write(); } }}
-                placeholder="What is this post about? e.g. Diwali sale — 30% off all sofas"
-                className="w-full px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-            />
+            {/* Mode tabs — only when both modes are available */}
+            {canUseImage && canUseText && (
+                <div className="flex gap-1 p-0.5 rounded-lg bg-[var(--bg)] border border-[var(--border)]">
+                    <button type="button" onClick={() => setMode('image')}
+                        className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                            mode === 'image' ? 'bg-[var(--accent)] text-[var(--bg)]' : 'text-[var(--muted)] hover:text-[var(--text)]'
+                        }`}>
+                        <ImageIcon className="h-3.5 w-3.5" /> From Image
+                    </button>
+                    <button type="button" onClick={() => setMode('text')}
+                        className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                            mode === 'text' ? 'bg-[var(--accent)] text-[var(--bg)]' : 'text-[var(--muted)] hover:text-[var(--text)]'
+                        }`}>
+                        <Type className="h-3.5 w-3.5" /> From Prompt
+                    </button>
+                </div>
+            )}
+
+            {/* Image mode */}
+            {mode === 'image' && canUseImage && (
+                <div className="space-y-2">
+                    <div className="flex items-center gap-3">
+                        <img src={imageUrl} alt="Selected" className="h-14 w-14 rounded-lg object-cover border border-[var(--border)] shrink-0" />
+                        <p className="text-xs text-[var(--muted)] leading-relaxed">
+                            AI will analyse this image. Optionally add extra context below.
+                        </p>
+                    </div>
+                    <input value={topic} onChange={(e) => setTopic(e.target.value)}
+                        placeholder="Extra context (optional) — e.g. Diwali sale, 30% off"
+                        className="w-full px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]" />
+                </div>
+            )}
+
+            {/* Text mode */}
+            {mode === 'text' && (
+                <input
+                    value={topic}
+                    onChange={(e) => setTopic(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); write(); } }}
+                    placeholder="What is this post about? e.g. Diwali sale — 30% off all sofas"
+                    className="w-full px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                />
+            )}
+
 
             <div className="flex flex-wrap items-center gap-3 text-[13px] text-[var(--muted)]">
                 <label className="flex items-center gap-1.5">

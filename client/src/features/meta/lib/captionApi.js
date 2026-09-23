@@ -7,14 +7,20 @@ const authHeaders = async () => {
     return { Authorization: `Bearer ${session.access_token}` };
 };
 
-/** Whether AI writing is configured on the server (hides the button if not). */
+/**
+ * Whether AI writing is configured on the server.
+ * Returns { textAi: boolean, imageAi: boolean }
+ */
 export const fetchAiStatus = async () => {
     try {
         const res = await fetch(`${API_BASE_URL}/api/ai/status`, { headers: await authHeaders() });
         const payload = await res.json().catch(() => ({}));
-        return Boolean(payload.configured);
+        return {
+            textAi: Boolean(payload.configured),
+            imageAi: Boolean(payload.visionConfigured),
+        };
     } catch {
-        return false;
+        return { textAi: false, imageAi: false };
     }
 };
 
@@ -29,3 +35,4 @@ export const generateCaption = async (body) => {
     if (!res.ok) throw new Error(payload.error || `Request failed (${res.status})`);
     return payload.caption || '';
 };
+
