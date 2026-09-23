@@ -187,7 +187,7 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
                 <div className="space-y-6">
                     {scheduledMedia.length > 0 && (
                         <div>
-                            <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Scheduled</h4>
+                            <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Scheduled / Posted</h4>
                             {renderMediaGrid(scheduledMedia)}
                         </div>
                     )}
