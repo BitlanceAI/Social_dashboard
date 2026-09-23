@@ -1,3 +1,4 @@
+import { parseContentCSV, normalizeContentItem, buildPipelineImagePrompt } from '../../shared/utils/pipeline-content.mjs';
 import { reserveUsage, releaseUsage } from '../billing/billing.service.js';
 /**
  * Pipeline Execution Engine
@@ -19,6 +20,9 @@ import MetaService from '../meta/meta.service.js';
 import LinkedInService from '../linkedin/linkedin.service.js';
 import { decryptData } from '../../shared/utils/encryption.js';
 import sharp from 'sharp';
+import { getDefaultApprovers, requestApproval } from '../approvals/approval.service.js';
+import { isWhatsAppEnabled } from '../whatsapp/whatsapp.service.js';
+import { addQueueItems } from './pipeline.service.js';
 
 const getClient = () => supabaseAdmin || supabase;
 
@@ -42,22 +46,7 @@ export const fetchGoogleSheetRows = async (sheetUrlOrId) => {
         if (!response.ok) throw new Error(`Google Sheets export returned HTTP ${response.status}`);
 
         const csvText = await response.text();
-        const lines = csvText.split('\n').filter((l) => l.trim());
-        if (lines.length < 2) return [];
-
-        const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
-        const rows = [];
-
-        for (let i = 1; i < lines.length; i++) {
-            const values = lines[i].split(',').map((v) => v.trim().replace(/^"|"$/g, ''));
-            const rowObj = {};
-            headers.forEach((h, idx) => {
-                rowObj[h] = values[idx] || '';
-            });
-            rows.push(rowObj);
-        }
-
-        return rows;
+        return parseContentCSV(csvText);
     } catch (err) {
         console.error('[PipelineExecutor] Failed to fetch Google Sheet:', err.message);
         throw new Error(`Google Sheet fetch failed: ${err.message}`);
@@ -157,6 +146,8 @@ import { isBunnyConfigured, bunnyUpload } from '../../shared/storage/bunny.js';
 export const generatePipelineImage = async ({
     titleHook,
     contentPillar,
+    captionOutline,
+    caption,
     brandLogoText = 'Rahul Saini',
     customTemplate,
     userId = 'system',
@@ -167,14 +158,7 @@ export const generatePipelineImage = async ({
         return null;
     }
 
-    const defaultPrompt = `Professional, modern, minimal flat-design illustration for a social media post about: "${titleHook}". Theme: ${contentPillar || 'SaaS & Tech'}. Style: clean tech/SaaS branding, dark navy and electric-blue accent palette, high contrast, 1:1 square composition. Include the text "${brandLogoText}" as a small logo-style wordmark in a corner, and work the phrase "${titleHook}" into the design as a short, bold headline overlay — clean sans-serif font, legible at thumbnail size.`;
-
-    const prompt = customTemplate
-        ? customTemplate
-            .replace(/\{\{titleHook\}\}/g, titleHook)
-            .replace(/\{\{contentPillar\}\}/g, contentPillar || '')
-            .replace(/\{\{brandLogoText\}\}/g, brandLogoText)
-        : defaultPrompt;
+    const prompt = buildPipelineImagePrompt({ titleHook, contentPillar, captionOutline, caption, brandLogoText, customTemplate });
 
     try {
         const { buffer, contentType } = await generateImage({
@@ -253,7 +237,8 @@ export const generatePipelineImage = async ({
 /**
  * Execute a Pipeline run (Processes the next pending row)
  */
-export const runPipeline = async (pipelineId) => {
+export const runPipeline = async (pipelineId, workspaceId) => {
+    if (!workspaceId) throw new Error('Active workspace is required to run a pipeline');
     const db = getClient();
 
     // 1. Fetch Pipeline config
@@ -261,6 +246,7 @@ export const runPipeline = async (pipelineId) => {
         .from('content_pipelines')
         .select('*')
         .eq('id', pipelineId)
+        .eq('workspace_id', workspaceId)
         .single();
 
     if (pipeError || !pipeline) {
@@ -288,32 +274,11 @@ export const runPipeline = async (pipelineId) => {
         try {
             console.log(`[PipelineExecutor] Content queue empty. Syncing from Google Sheet: ${pipeline.sheet_url}`);
             const sheetRows = await fetchGoogleSheetRows(pipeline.sheet_url);
-            const pendingRows = sheetRows.filter((r) => r.Status === 'Pending' || r.status === 'Pending');
-
-            if (pendingRows.length > 0) {
-                const nextRow = pendingRows[0];
-
-                const { data: inserted, error: insErr } = await db
-                    .from('content_queue')
-                    .insert({
-                        pipeline_id: pipelineId,
-                        workspace_id: pipeline.workspace_id,
-                        day: String(nextRow.Day || nextRow.day || '').slice(0, 49),
-                        date_str: String(nextRow.Date || nextRow.date || '').slice(0, 49),
-                        title_hook: String(nextRow['Post Title / Hook'] || nextRow.title_hook || nextRow.Hook || 'Untitled Post'),
-                        content_pillar: String(nextRow['Content Pillar'] || nextRow.content_pillar || '').slice(0, 254),
-                        caption_outline: String(nextRow['Caption Outline'] || nextRow.caption_outline || ''),
-                        format: String(nextRow.Format || nextRow.format || '').slice(0, 99),
-                        cta: String(nextRow.CTA || nextRow.cta || ''),
-                        status: 'pending',
-                    })
-                    .select()
-                    .single();
-
-                if (!insErr && inserted) item = inserted;
-            }
+            const imported = await addQueueItems(pipelineId, pipeline.workspace_id, sheetRows);
+            item = imported[0] || null;
         } catch (syncErr) {
             console.error('[PipelineExecutor] Google Sheet sync error:', syncErr.message);
+            throw syncErr;
         }
     }
 
@@ -323,6 +288,9 @@ export const runPipeline = async (pipelineId) => {
     }
 
     console.log(`[PipelineExecutor] Processing item "${item.title_hook}" for pipeline "${pipeline.name}"...`);
+
+    // Refuse corrupted legacy imports before spending generation credits.
+    normalizeContentItem(item);
 
     // Mark status as generating
     const { data: claimed, error: claimError } = await db
@@ -335,7 +303,11 @@ export const runPipeline = async (pipelineId) => {
     let autoReservation;
     let generated = false;
     let publishAttempted = false;
+    let scheduledPostId = null;
+    let approvalDelivery = null;
     try {
+        const approverPhones = pipeline.auto_publish ? [] : pipeline.approver_phones?.length
+            ? pipeline.approver_phones : await getDefaultApprovers(pipeline.workspace_id);
         if (pipeline.auto_publish) autoReservation = await reserveUsage(pipeline.user_id, pipeline.workspace_id, 'trial_auto_posts');
         generationReservation = await reserveUsage(pipeline.user_id, pipeline.workspace_id);
         // 3. Generate AI Caption
@@ -357,6 +329,8 @@ export const runPipeline = async (pipelineId) => {
         const imageUrl = await generatePipelineImage({
             titleHook: item.title_hook,
             contentPillar: item.content_pillar,
+            captionOutline: item.caption_outline,
+            caption: fullText,
             brandLogoText: pipeline.brand_logo_text,
             customTemplate: pipeline.image_prompt_template,
             userId: pipeline.user_id,
@@ -366,7 +340,6 @@ export const runPipeline = async (pipelineId) => {
         const mediaUrls = imageUrl ? [imageUrl] : [];
 
         // 5. Create Scheduled Post or Publish
-        let scheduledPostId = null;
         const targetPlatforms = pipeline.target_platforms || ['linkedin'];
         const provider = pipeline.provider || 'linkedin';
 
@@ -461,6 +434,7 @@ export const runPipeline = async (pipelineId) => {
             media_urls: mediaUrls,
             scheduled_time: new Date().toISOString(),
             status: pipeline.auto_publish ? 'processing' : 'pending_approval',
+            approver_phones: approverPhones,
         };
 
         if (pipeline.auto_publish) {
@@ -486,7 +460,7 @@ export const runPipeline = async (pipelineId) => {
                 });
 
                 if (res.success) {
-                    await db
+                    const { error: publishSaveError } = await db
                         .from('scheduled_posts')
                         .update({
                             status: 'published',
@@ -495,7 +469,10 @@ export const runPipeline = async (pipelineId) => {
                             publish_results: { linkedin: { success: true, postId: res.postUrn } },
                         })
                         .eq('id', scheduledPostId);
+                    if (publishSaveError) throw publishSaveError;
                 } else {
+                    await db.from('scheduled_posts').update({ status: 'failed', error_message: res.error })
+                        .eq('id', scheduledPostId);
                     throw new Error(`LinkedIn publish error: ${res.error}`);
                 }
             } else if (provider === 'meta' && activeMetaConn) {
@@ -549,7 +526,7 @@ export const runPipeline = async (pipelineId) => {
 
                 const anySuccess = Object.values(publishResults).some((r) => r.success);
                 const mainPostId = publishResults.facebook?.postId || publishResults.instagram?.postId;
-                await db
+                const { error: publishSaveError } = await db
                     .from('scheduled_posts')
                     .update({
                         status: anySuccess ? 'published' : 'failed',
@@ -558,6 +535,7 @@ export const runPipeline = async (pipelineId) => {
                         publish_results: publishResults,
                     })
                     .eq('id', scheduledPostId);
+                if (publishSaveError) throw publishSaveError;
 
                 if (!anySuccess) {
                     const errors = Object.entries(publishResults)
@@ -578,18 +556,31 @@ export const runPipeline = async (pipelineId) => {
             scheduledPostId = postRow.id;
         }
 
+        if (!pipeline.auto_publish) {
+            approvalDelivery = !approverPhones.length
+                ? { sent: false, error: 'No approval numbers configured. Add WhatsApp numbers in pipeline settings or workspace defaults, or review in Approval Queue.' }
+                : !isWhatsAppEnabled()
+                    ? { sent: false, error: 'WhatsApp is not configured. Review this post in Approval Queue.' }
+                    : await requestApproval({ ...postPayload, id: scheduledPostId }).catch(err => ({ sent: false, error: err.message }));
+        }
+
         // 6. Update Queue Row Status
-        await db
+        const { data: finalPost, error: finalPostError } = await db.from('scheduled_posts').select('status')
+            .eq('id', scheduledPostId).eq('workspace_id', workspaceId).single();
+        if (finalPostError) throw finalPostError;
+        const { error: queueUpdateError } = await db
             .from('content_queue')
             .update({
-                status: 'posted',
+                status: finalPost.status === 'pending' ? 'scheduled' : finalPost.status,
                 generated_caption: caption,
                 generated_hashtags: hashtags,
                 generated_image_url: imageUrl,
                 scheduled_post_id: scheduledPostId,
                 updated_at: new Date().toISOString(),
+                error_message: approvalDelivery && !approvalDelivery.sent ? approvalDelivery.error : null,
             })
             .eq('id', item.id);
+        if (queueUpdateError) throw queueUpdateError;
 
         // Update pipeline last_run_at
         await db
@@ -597,7 +588,7 @@ export const runPipeline = async (pipelineId) => {
             .update({ last_run_at: new Date().toISOString() })
             .eq('id', pipelineId);
 
-        console.log(`✅ [PipelineExecutor] Item "${item.title_hook}" successfully processed and posted!`);
+        console.log(`[PipelineExecutor] Item "${item.title_hook}": ${finalPost.status}`);
 
         return {
             status: 'success',
@@ -606,16 +597,23 @@ export const runPipeline = async (pipelineId) => {
             caption,
             imageUrl,
             scheduledPostId,
+            postStatus: finalPost.status,
+            approvalDelivery,
         };
     } catch (err) {
         if (!generated) await releaseUsage(generationReservation);
         if (!publishAttempted) await releaseUsage(autoReservation);
         console.error(`❌ [PipelineExecutor] Failed to process item "${item.title_hook}":`, err.message);
+        if (scheduledPostId && !publishAttempted) {
+            await db.from('scheduled_posts').update({ status: 'failed', error_message: err.message })
+                .eq('id', scheduledPostId).eq('status', 'processing');
+        }
 
         await db
             .from('content_queue')
             .update({
                 status: 'failed',
+                ...(scheduledPostId ? { scheduled_post_id: scheduledPostId } : {}),
                 error_message: err.message,
                 updated_at: new Date().toISOString(),
             })

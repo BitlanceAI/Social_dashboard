@@ -80,6 +80,28 @@ test('queue isolates workspaces, counts before pagination, and excludes settled/
     assert.deepEqual(result.approvedPosts.map(row => row.status), ['pending', 'processing', 'scheduled']);
 });
 
+test('rejected queue preserves feedback, paginates newest first, and excludes other workspaces and ordinary cancellations', async () => {
+    const rows = Array.from({ length: 27 }, (_, i) => ({
+        id: String(i).padStart(2, '0'), workspace_id: 'a', status: 'cancelled',
+        rejected_at: new Date(Date.UTC(2026, 8, 1, i)).toISOString(),
+        rejected_by: '919876543210', rejection_comment: `Reason ${i}`, awaiting_rejection_feedback: false,
+    }));
+    rows.push({ ...rows[0], id: 'foreign', workspace_id: 'b' });
+    rows.push({ id: 'manual-cancellation', workspace_id: 'a', status: 'cancelled' });
+    rows.push({ ...rows[0], id: 'rescheduled', status: 'pending' });
+    const first = await loadApprovalQueue(database(rows), 'a');
+    assert.equal(first.rejectedCount, 27);
+    assert.equal(first.rejectedPosts.length, 25);
+    assert.equal(first.rejectedPosts[0].id, '26');
+    assert.equal(first.rejectedPosts[0].rejection_comment, 'Reason 26');
+    assert.equal(first.rejectedPosts[0].rejected_by, '919876543210');
+    assert.equal(first.rejectedPosts[0].awaiting_rejection_feedback, false);
+    const second = await loadApprovalQueue(database(rows), 'a', 1, 1, 2);
+    assert.equal(second.rejectedCount, 27);
+    assert.equal(second.rejectedPage, 2);
+    assert.deepEqual(second.rejectedPosts.map(row => row.id), ['01', '00']);
+});
+
 test('invalid page inputs are rejected', () => {
     for (const value of ['0', '-1', '1.5', 'abc', '', '100001', ['1', '2']]) assert.equal(parseQueuePage(value), null);
     assert.equal(parseQueuePage(undefined), 1);

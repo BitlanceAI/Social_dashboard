@@ -29,11 +29,30 @@ import {
 } from './approval.service.js';
 
 import { loadApprovalQueue, parseQueuePage } from './approval.store.js';
+import { loadRejectedPost, generateRevision, resubmitRevision } from './revision.service.js';
 
 const router = express.Router();
 
 router.use(authenticateUser);
 router.use(resolveWorkspace);
+
+router.post('/:id/revise', async (req, res) => {
+    try {
+        const post = await loadRejectedPost(req.params.id, req.workspaceId);
+        res.json({ success: true, ...await generateRevision(post, req.user.id) });
+    } catch (err) {
+        res.status(err.status || 500).json({ error: err.status ? err.message : 'Could not generate a revision.' });
+    }
+});
+
+router.post('/:id/resubmit', async (req, res) => {
+    try {
+        const post = await loadRejectedPost(req.params.id, req.workspaceId);
+        res.json(await resubmitRevision(post, req.body || {}));
+    } catch (err) {
+        res.status(err.status || 500).json({ error: err.status ? err.message : 'Could not resubmit the revision.' });
+    }
+});
 
 const loadPendingPost = async (req, res) => {
     const { data: post, error } = await supabaseAdmin
@@ -57,11 +76,12 @@ const loadPendingPost = async (req, res) => {
 router.get('/pending', async (req, res) => {
     const pendingPage = parseQueuePage(req.query.pendingPage);
     const approvedPage = parseQueuePage(req.query.approvedPage);
-    if (pendingPage === null || approvedPage === null) {
+    const rejectedPage = parseQueuePage(req.query.rejectedPage);
+    if (pendingPage === null || approvedPage === null || rejectedPage === null) {
         return res.status(400).json({ error: 'Pages must be positive integers (maximum 100000).' });
     }
     try {
-        res.json(await loadApprovalQueue(supabaseAdmin, req.workspaceId, pendingPage, approvedPage));
+        res.json(await loadApprovalQueue(supabaseAdmin, req.workspaceId, pendingPage, approvedPage, rejectedPage));
     } catch (err) {
         console.error('Load approval queue error:', err);
         res.status(500).json({ error: 'Could not load approval queue.' });

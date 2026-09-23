@@ -29,6 +29,7 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
     captionPromptTemplate: DEFAULT_CAPTION_PROMPT,
     imagePromptTemplate: DEFAULT_IMAGE_PROMPT,
     autoPublish: true,
+    approverPhones: '',
   });
   const [loading, setLoading] = useState(false);
 
@@ -48,6 +49,7 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
         captionPromptTemplate: pipeline.caption_prompt_template || DEFAULT_CAPTION_PROMPT,
         imagePromptTemplate: pipeline.image_prompt_template || DEFAULT_IMAGE_PROMPT,
         autoPublish: pipeline.auto_publish ?? true,
+        approverPhones: (pipeline.approver_phones || []).join(', '),
       });
     } else {
       setFormData({
@@ -61,6 +63,7 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
         captionPromptTemplate: DEFAULT_CAPTION_PROMPT,
         imagePromptTemplate: DEFAULT_IMAGE_PROMPT,
         autoPublish: true,
+        approverPhones: '',
       });
     }
 
@@ -365,7 +368,7 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
               />
               <div className="flex flex-wrap gap-1.5 items-center pt-1">
                 <span className="text-[10px] text-[var(--muted)]">Insert tag:</span>
-                {['{{titleHook}}', '{{contentPillar}}', '{{brandLogoText}}'].map((tag) => (
+                {['{{titleHook}}', '{{contentPillar}}', '{{brandLogoText}}', '{{captionOutline}}', '{{caption}}'].map((tag) => (
                   <button
                     type="button"
                     key={tag}
@@ -393,9 +396,30 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
               className="w-4 h-4 rounded border-[var(--border)] bg-[var(--surface)] text-[var(--accent)] focus:ring-[var(--accent)]/30"
             />
             <label htmlFor="autoPublish" className="text-xs font-medium text-[var(--text)] cursor-pointer">
-              Auto-Publish Immediately (If unchecked, generated posts go to Approval Queue)
+              Auto-Publish Immediately (Uncheck to require approval before publishing)
             </label>
           </div>
+
+          {!formData.autoPublish && (
+            <div className="p-4 bg-[var(--bg)] border border-[var(--border)] rounded-2xl space-y-2">
+              <label htmlFor="pipeline-approver-phones" className="block text-xs font-medium text-[var(--text)]">
+                WhatsApp approval number(s)
+              </label>
+              <input
+                id="pipeline-approver-phones"
+                type="text"
+                value={formData.approverPhones}
+                onChange={(e) => setFormData({ ...formData, approverPhones: e.target.value })}
+                placeholder="e.g. +919876543210"
+                aria-describedby="pipeline-approver-help"
+                className="w-full px-4 py-2.5 bg-[var(--surface)] border border-[var(--border)] rounded-xl text-sm text-[var(--text)] placeholder-[var(--muted-2)] focus:outline-none focus:border-[var(--accent)] transition"
+              />
+              <p id="pipeline-approver-help" className="text-[11px] text-[var(--muted)]">
+                Include the country code. Separate multiple numbers with commas. Leave blank to use workspace default approvers.
+                New posts will wait in the Approval Queue. WhatsApp requests require a configured WhatsApp connection.
+              </p>
+            </div>
+          )}
 
           <div className="pt-4 border-t border-[var(--border)] flex justify-end gap-3 shrink-0">
             <button

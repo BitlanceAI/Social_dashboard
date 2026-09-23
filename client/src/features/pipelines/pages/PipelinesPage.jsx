@@ -6,6 +6,8 @@ import PipelineEditorModal from '../components/PipelineEditorModal';
 import ImportContentModal from '../components/ImportContentModal';
 import { useWorkspace } from '@/features/workspace';
 
+const queueLabels = { all: 'All', pending: 'Queued', generating: 'Generating', pending_approval: 'Awaiting approval', scheduled: 'Scheduled', processing: 'Publishing', published: 'Published', rejected: 'Rejected', cancelled: 'Cancelled', failed: 'Failed' };
+
 export default function PipelinesPage() {
   const { activeWorkspaceId } = useWorkspace();
   const [pipelines, setPipelines] = useState([]);
@@ -42,8 +44,12 @@ export default function PipelinesPage() {
     try {
       setRunningId(id);
       toast.loading(`Running AI campaign "${name}"...`, { id: 'run-toast' });
-      await runPipelineNow(id, activeWorkspaceId);
-      toast.success(`Pipeline "${name}" executed successfully!`, { id: 'run-toast' });
+      const result = await runPipelineNow(id, activeWorkspaceId);
+      const message = result.status === 'no_pending_items' ? 'No queued content to generate.'
+        : result.status === 'skipped' ? 'Pipeline run skipped.'
+          : result.postStatus === 'pending_approval' ? 'Post generated and awaiting approval.' : `Post status: ${queueLabels[result.postStatus] || result.postStatus}.`;
+      toast.success(message, { id: 'run-toast' });
+      if (result.approvalDelivery && !result.approvalDelivery.sent) toast(result.approvalDelivery.error, { duration: 7000 });
       loadPipelines();
     } catch (err) {
       toast.error(err.message || 'Pipeline execution failed', { id: 'run-toast' });
@@ -89,7 +95,7 @@ export default function PipelinesPage() {
   };
 
   return (
-    <div className="space-y-8 p-6 md:p-10 min-h-screen bg-[var(--bg)] text-[var(--text)]">
+    <div className="space-y-8 text-[var(--text)]">
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[var(--border)] pb-6">
         <div>
@@ -258,6 +264,7 @@ export default function PipelinesPage() {
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
+                <button disabled={queueLoading} onClick={() => handleOpenQueue(activePipelineForQueue)} className="px-3 py-1.5 rounded-xl border border-[var(--border)] text-xs disabled:opacity-50">Refresh status</button>
                 <button
                   onClick={() => setImportModalOpen(true)}
                   className="px-3.5 py-1.5 bg-[var(--accent-muted)] text-[var(--accent)] border border-[var(--accent)]/30 hover:bg-[var(--accent)] hover:text-white text-xs font-mono font-bold uppercase tracking-wider rounded-full transition flex items-center gap-1.5"
@@ -284,8 +291,8 @@ export default function PipelinesPage() {
             </div>
 
             {/* Filter Bar */}
-            <div className="px-6 py-2 border-b border-[var(--border)] bg-[var(--bg)] flex items-center gap-2 text-xs font-mono font-bold">
-              {['all', 'pending', 'generating', 'posted', 'failed'].map((filter) => {
+            <div className="px-6 py-2 border-b border-[var(--border)] bg-[var(--bg)] flex flex-wrap items-center gap-2 text-xs font-mono font-bold">
+              {Object.keys(queueLabels).map((filter) => {
                 const count = queueItems.filter((i) => filter === 'all' || i.status === filter).length;
                 return (
                   <button
@@ -297,7 +304,7 @@ export default function PipelinesPage() {
                         : 'text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--surface)]'
                     }`}
                   >
-                    {filter} ({count})
+                    {queueLabels[filter]} ({count})
                   </button>
                 );
               })}
@@ -338,7 +345,7 @@ export default function PipelinesPage() {
                             )}
                             <span
                               className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider ${
-                                item.status === 'posted'
+                                item.status === 'published'
                                   ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
                                   : item.status === 'generating'
                                   ? 'bg-[var(--accent-muted)] text-[var(--accent)] border border-[var(--accent)]/20'
@@ -347,7 +354,7 @@ export default function PipelinesPage() {
                                   : 'bg-[var(--surface-2)] text-[var(--muted)]'
                               }`}
                             >
-                              {item.status}
+                              {queueLabels[item.status] || item.status}
                             </span>
                           </div>
                         </div>
@@ -361,7 +368,7 @@ export default function PipelinesPage() {
 
                         {item.error_message && (
                           <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400 font-mono text-[11px] leading-relaxed">
-                            <strong>Execution Error:</strong> {item.error_message}
+                            <strong>{item.status === 'failed' ? 'Execution error:' : 'Run notice:'}</strong> {item.error_message}
                           </div>
                         )}
 

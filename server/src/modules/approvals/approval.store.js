@@ -6,23 +6,28 @@ export const parseQueuePage = (value = '1') => {
     return Number.isSafeInteger(page) && page >= 1 && page <= 100000 ? page : null;
 };
 
-export const loadApprovalQueue = async (db, workspaceId, pendingPage = 1, approvedPage = 1) => {
+export const loadApprovalQueue = async (db, workspaceId, pendingPage = 1, approvedPage = 1, rejectedPage = 1) => {
     const base = () => db.from('scheduled_posts').select('*', { count: 'exact' }).eq('workspace_id', workspaceId);
     const range = (query, page) => query.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
-    const [pending, approved] = await Promise.all([
+    const [pending, approved, rejected] = await Promise.all([
         range(base().eq('status', 'pending_approval').order('created_at', { ascending: false }).order('id'), pendingPage),
         range(base().not('approved_at', 'is', null).in('status', ['pending', 'processing', 'scheduled'])
             .order('scheduled_time').order('id'), approvedPage),
+        range(base().eq('status', 'cancelled').not('rejected_at', 'is', null)
+            .order('rejected_at', { ascending: false }).order('id'), rejectedPage),
     ]);
     if (pending.error) throw pending.error;
     if (approved.error) throw approved.error;
+    if (rejected.error) throw rejected.error;
     return {
         success: true,
         posts: pending.data || [],
         approvedPosts: approved.data || [],
+        rejectedPosts: rejected.data || [],
         pendingCount: pending.count || 0,
         approvedCount: approved.count || 0,
-        pendingPage, approvedPage, pageSize: PAGE_SIZE,
+        rejectedCount: rejected.count || 0,
+        pendingPage, approvedPage, rejectedPage, pageSize: PAGE_SIZE,
     };
 };
 

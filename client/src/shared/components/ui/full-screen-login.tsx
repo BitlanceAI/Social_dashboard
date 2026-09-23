@@ -1,178 +1,65 @@
-"use client";
-
-import { Bot as BotIcon, Mail, Lock, Eye, EyeOff, AlertCircle } from "lucide-react";
-import React, { useState } from "react";
-import { ElegantShape } from "./shape-landing-hero";
-
-const TEAL = '#26CECE';
+import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
+import { ArrowRight, Eye, EyeOff, AlertCircle, CalendarClock } from 'lucide-react';
 
 interface FullScreenLoginProps {
     email: string;
     setEmail: (value: string) => void;
     password: string;
     setPassword: (value: string) => void;
-    handleSubmit: (e: React.FormEvent) => void;
+    handleSubmit: (e: FormEvent) => void;
     loading: boolean;
+    error?: string;
 }
 
-export const FullScreenLogin = ({
-    email,
-    setEmail,
-    password,
-    setPassword,
-    handleSubmit,
-    loading
-}: FullScreenLoginProps) => {
+export function FullScreenLogin({ email, setEmail, password, setPassword, handleSubmit, loading, error }: FullScreenLoginProps) {
     const [showPassword, setShowPassword] = useState(false);
-
+    const inputClass = 'w-full min-w-0 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[var(--accent)] placeholder:text-[var(--text)]/50';
     return (
-        <div className="min-h-screen flex items-center justify-center overflow-hidden p-4 bg-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-            <div className="w-full relative max-w-5xl overflow-hidden flex flex-col md:flex-row shadow-2xl" style={{ borderRadius: 2, border: '1px solid #1E1E1E' }}>
-
-                {/* Left side Image & Branding */}
-                <div className="w-full md:w-1/2 relative overflow-hidden bg-gray-50 flex flex-col justify-end min-h-[400px] border-b md:border-b-0 md:border-r border-gray-200">
-                    {/* Animated Shapes Background */}
-                    <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                        <ElegantShape
-                            delay={0.3}
-                            width={600}
-                            height={140}
-                            rotate={12}
-                            gradient="from-[#26CECE]/[0.15]"
-                            className="left-[-15%] top-[15%]"
-                        />
-                        <ElegantShape
-                            delay={0.5}
-                            width={500}
-                            height={120}
-                            rotate={-15}
-                            gradient="from-[#26CECE]/[0.10]"
-                            className="right-[-10%] top-[70%]"
-                        />
-                        <ElegantShape
-                            delay={0.7}
-                            width={300}
-                            height={80}
-                            rotate={-8}
-                            gradient="from-indigo-500/[0.15]"
-                            className="left-[5%] bottom-[10%]"
-                        />
+        <main className="min-h-screen bg-[var(--bg)] text-[var(--text)] px-4 py-5 sm:p-8 flex items-center justify-center">
+            <div className="w-full max-w-5xl overflow-hidden rounded-2xl border border-[var(--border)] grid lg:grid-cols-[0.85fr_1.15fr]">
+                <aside className="hidden lg:flex flex-col justify-between bg-[var(--surface)] p-10 border-r border-[var(--border)]">
+                    <Link to="/" className="text-lg font-bold tracking-tight">Bitlance<span className="text-[var(--accent)]">.</span></Link>
+                    <div className="py-12">
+                        <CalendarClock aria-hidden="true" className="w-8 h-8 text-[var(--accent)] mb-6" />
+                        <h2 className="text-4xl font-bold leading-tight tracking-tight border-l-4 border-[var(--accent)] pl-4">Your next post<br />starts here.</h2>
+                        <p className="mt-5 text-sm leading-relaxed text-[var(--text)]/75">Pick up where you left off. Manage your content, connected accounts, and approvals in one place.</p>
                     </div>
-
-                    {/* Brutalist Pattern Background */}
-                    <div
-                        className="absolute inset-0 opacity-20"
-                        style={{
-                            backgroundImage: `radial-gradient(${TEAL} 1px, transparent 1px)`,
-                            backgroundSize: '20px 20px'
-                        }}
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-white via-white/80 to-transparent"></div>
-
-                    <div className="relative z-10 p-8 md:p-12 text-black pb-16">
-                        <div style={{ fontFamily: "'DM Mono', monospace", color: TEAL, fontSize: 11, letterSpacing: '0.14em', marginBottom: 16 }}>
-                            SECURE ACCESS
-                        </div>
-                        <h1 className="text-3xl md:text-5xl font-extrabold leading-[1.1] tracking-tight text-black mb-6">
-                            Welcome back to<br />
-                            <span style={{ color: TEAL }}>Bitlance.</span>
-                        </h1>
-                        <p className="text-black/60 text-lg leading-relaxed">
-                            Sign in to access your intelligent automation agents and continue building.
-                        </p>
-                    </div>
-                </div>
-
-                {/* Right side form */}
-                <div className="p-8 md:p-12 md:w-1/2 flex flex-col bg-white z-20 text-black justify-center">
-                    <div className="flex flex-col items-start mb-8">
-                        <div className="mb-6 flex items-center justify-center w-12 h-12" style={{ background: `${TEAL}15`, border: `1px solid ${TEAL}40`, borderRadius: 2, color: TEAL }}>
-                            <BotIcon size={24} />
-                        </div>
-                        <h2 className="text-3xl font-bold tracking-tight mb-2">
-                            Sign In
-                        </h2>
-                        <p className="text-gray-600" style={{ fontFamily: "'DM Mono', monospace", fontSize: 13 }}>
-                            Access your AI agents
-                        </p>
-                    </div>
-
-                    <form
-                        className="flex flex-col gap-6"
-                        onSubmit={handleSubmit}
-                    >
-                        {/* Email Field */}
-                        <div>
-                            <label htmlFor="email" className="block text-xs uppercase tracking-widest font-bold mb-2 text-gray-600" style={{ fontFamily: "'DM Mono', monospace" }}>
-                                Email Address
-                            </label>
-                            <div className="relative">
-                                <input
-                                    type="email"
-                                    id="email"
-                                    name="email"
-                                    placeholder="hi@bitlance.in"
-                                    className="w-full pl-11 py-3 px-3 focus:outline-none transition-all"
-                                    style={{ background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: 2, color: '#000000' }}
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    onFocus={(e) => e.target.style.borderColor = TEAL}
-                                    onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
-                                    required
-                                />
-                                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+                    <p className="text-xs text-[var(--text)]/70">Your publishing workspace</p>
+                </aside>
+                <section className="p-5 sm:p-8 lg:p-10 flex flex-col justify-center">
+                    <Link to="/" className="lg:hidden inline-block text-sm font-bold mb-6">Bitlance<span className="text-[var(--accent)]">.</span></Link>
+                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Welcome back</h1>
+                    <p className="mt-2 mb-7 text-sm text-[var(--text)]/75">Log in to your Bitlance account.</p>
+                    {error && <div role="alert" id="login-error" className="mb-5 rounded-xl border border-[var(--signup-error)] p-3 text-[var(--signup-error)] text-sm flex gap-2"><AlertCircle aria-hidden="true" className="h-5 w-5 shrink-0" />{error}</div>}
+                    <form onSubmit={handleSubmit} aria-busy={loading} aria-describedby={error ? 'login-error' : undefined}>
+                        <fieldset disabled={loading} className="space-y-5 disabled:opacity-70">
+                            <legend className="sr-only">Login details</legend>
+                            <div>
+                                <label htmlFor="login-email" className="block text-sm font-medium mb-1.5">Email address</label>
+                                <input id="login-email" name="email" type="email" autoComplete="email" placeholder="you@company.com" required value={email} onChange={e => setEmail(e.target.value)} className={inputClass} />
                             </div>
-                        </div>
-
-                        {/* Password Field */}
-                        <div>
-                            <label htmlFor="password" className="block text-xs uppercase tracking-widest font-bold mb-2 text-gray-600" style={{ fontFamily: "'DM Mono', monospace" }}>
-                                Password
-                            </label>
-                            <div className="relative">
-                                <input
-                                    type={showPassword ? 'text' : 'password'}
-                                    id="password"
-                                    name="password"
-                                    placeholder="••••••••"
-                                    className="w-full pl-11 pr-11 py-3 px-3 focus:outline-none transition-all"
-                                    style={{ background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: 2, color: '#000000' }}
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    onFocus={(e) => e.target.style.borderColor = TEAL}
-                                    onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
-                                    required
-                                />
-                                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
-                                <button
-                                    type="button"
-                                    onClick={() => setShowPassword(!showPassword)}
-                                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-600"
-                                    tabIndex={-1}
-                                >
-                                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                                </button>
+                            <div>
+                                <label htmlFor="login-password" className="block text-sm font-medium mb-1.5">Password</label>
+                                <div className="relative">
+                                    <input id="login-password" name="password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="Enter your password" required value={password} onChange={e => setPassword(e.target.value)} className={`${inputClass} pr-12`} />
+                                    <button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword} className="absolute right-1 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-lg focus-visible:outline focus-visible:outline-[var(--accent)]">
+                                        {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                                    </button>
+                                </div>
                             </div>
-                        </div>
-
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full font-bold py-4 px-4 transition-all mt-4 flex justify-center items-center hover:scale-[1.02] active:scale-95 disabled:hover:scale-100 disabled:opacity-50"
-                            style={{ background: TEAL, color: '#070707', border: 'none', borderRadius: 2 }}
-                        >
-                            {loading ? 'SIGNING IN...' : 'SIGN IN'}
-                        </button>
-
-                        <div className="text-center text-gray-600 text-sm mt-4">
-                            Don't have an account?{" "}
-                            <a href="/signup" className="font-bold hover:underline" style={{ color: TEAL }}>
-                                Create account
-                            </a>
-                        </div>
+                            <button type="submit" disabled={loading} className="btn-primary w-full rounded-xl py-3 px-4 flex items-center justify-center gap-2 disabled:cursor-wait">
+                                {loading ? 'Logging in…' : 'Log in'}<ArrowRight aria-hidden="true" className="h-4 w-4" />
+                            </button>
+                        </fieldset>
+                        <p className="mt-6 text-center text-sm">New to Bitlance? <Link to="/signup" className="font-semibold underline underline-offset-4">Create account</Link></p>
                     </form>
-                </div>
+                    <div className="mt-7 flex justify-center gap-4 text-xs text-[var(--text)]/70">
+                        <Link to="/terms-policy" className="underline underline-offset-2">Terms of Service</Link>
+                        <Link to="/privacy-policy" className="underline underline-offset-2">Privacy Policy</Link>
+                    </div>
+                </section>
             </div>
-        </div>
+        </main>
     );
-};
+}

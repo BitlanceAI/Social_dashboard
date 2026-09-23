@@ -60,12 +60,15 @@ router.post('/webhook', async (req, res) => {
     if (verification.warning) console.warn(`[WhatsApp] ${verification.warning}`);
 
     try {
+        console.log(`[WhatsApp] Authenticated webhook received — entries=${req.body?.entry?.length || 0}`);
         for (const entry of req.body?.entry || []) {
             for (const change of entry.changes || []) {
                 if (change.field !== 'messages') continue;
                 const value = change.value || {};
+                console.log(`[WhatsApp] Message event — phone_id=${value.metadata?.phone_number_id || 'unknown'} messages=${value.messages?.length || 0} statuses=${value.statuses?.length || 0}`);
 
                 for (const st of value.statuses || []) {
+                    console.log(`[WhatsApp] Delivery status — status=${st.status} id=${st.id}`);
                     if (st.status === 'failed') {
                         console.error(`[WhatsApp] ✗ delivery FAILED id=${st.id} to=${st.recipient_id} errors=${JSON.stringify(st.errors || [])}`);
                         for (const e of st.errors || []) {

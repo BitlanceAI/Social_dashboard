@@ -10,10 +10,20 @@ import { CalendarClock, AlertCircle, MessageCircle } from 'lucide-react';
  */
 
 /** Format a Date as the `YYYY-MM-DDTHH:mm` the input expects, in local time. */
-const toLocalInputValue = (date) => {
+const IST_OFFSET_MS = 330 * 60 * 1000;
+
+const toIstInputValue = (date) => {
+    const ist = new Date(date.getTime() + IST_OFFSET_MS);
     const pad = (n) => String(n).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-        + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    return `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`
+        + `T${pad(ist.getUTCHours())}:${pad(ist.getUTCMinutes())}`;
+};
+
+const futureIstTime = (days, hour) => {
+    const istWallClock = new Date(Date.now() + IST_OFFSET_MS);
+    istWallClock.setUTCDate(istWallClock.getUTCDate() + days);
+    istWallClock.setUTCHours(hour, 0, 0, 0);
+    return new Date(istWallClock.getTime() - IST_OFFSET_MS);
 };
 
 /** Digits only; 10-digit Indian numbers get the 91 prefix (mirrors the server). */
@@ -48,29 +58,28 @@ const StepSchedule = ({
     // produce a UTC string and let the user pick times already in the past.
     const min = new Date();
     min.setMinutes(min.getMinutes() + 2);
-    const minValue = toLocalInputValue(min);
+    const minValue = toIstInputValue(min);
 
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-    const chosen = scheduledTime ? new Date(scheduledTime) : null;
+    const chosen = scheduledTime ? new Date(`${scheduledTime}:00+05:30`) : null;
     const isValidDate = chosen && !Number.isNaN(chosen.getTime());
-    const isPast = isValidDate && chosen.getTime() < Date.now();
+    const isPast = isValidDate && chosen.getTime() < min.getTime();
 
     const quickPicks = [
         { label: 'In 1 hour', build: () => { const d = new Date(); d.setHours(d.getHours() + 1, d.getMinutes(), 0, 0); return d; } },
-        { label: 'Tomorrow 9:00', build: () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d; } },
-        { label: 'Tomorrow 12:00', build: () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(12, 0, 0, 0); return d; } },
-        { label: 'Tomorrow 18:00', build: () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(18, 0, 0, 0); return d; } },
-        { label: 'Next week', build: () => { const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(10, 0, 0, 0); return d; } },
+        { label: 'Tomorrow 9:00', build: () => futureIstTime(1, 9) },
+        { label: 'Tomorrow 12:00', build: () => futureIstTime(1, 12) },
+        { label: 'Tomorrow 18:00', build: () => futureIstTime(1, 18) },
+        { label: 'Next week', build: () => futureIstTime(7, 10) },
     ];
 
     return (
-        <div className="space-y-8">
-            <h4 className="text-xl font-extrabold font-['Space_Grotesk'] text-[var(--text)] tracking-tight flex items-center gap-3 border-l-4 border-[var(--accent)] pl-3 mb-6">
+        <div className="space-y-4">
+            <h4 className="text-xl font-extrabold font-['Space_Grotesk'] text-[var(--text)] tracking-tight flex items-center gap-3 border-l-4 border-[var(--accent)] pl-3 mb-4">
                 <CalendarClock className="h-5 w-5 text-[var(--accent)]" /> Pick a time
             </h4>
 
-            <div className="max-w-md rounded-2xl bg-[var(--bg)] border border-[var(--border)] p-6">
+            <div className={`grid grid-cols-1 gap-4 ${approvalEnabled ? 'lg:grid-cols-2' : ''}`}>
+            <div className="rounded-2xl bg-[var(--bg)] border border-[var(--border)] p-5">
                 <label htmlFor="scheduled-time" className="block text-sm font-medium text-[var(--text)] mb-3">
                     Publish time
                 </label>
@@ -89,7 +98,7 @@ const StepSchedule = ({
                         <span className="font-medium">
                             {chosen.toLocaleString(undefined, {
                                 weekday: 'short', day: 'numeric', month: 'short',
-                                hour: '2-digit', minute: '2-digit'
+                                hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata'
                             })}
                         </span>
                     </p>
@@ -103,21 +112,20 @@ const StepSchedule = ({
                 )}
 
                 <p className="text-xs text-[var(--muted)] mt-4 leading-relaxed">
-                    Times use your device&apos;s timezone ({timeZone}). We convert to UTC when
-                    saving, so the post goes out at the moment you picked.
+                    All times are in Indian Standard Time (IST, Asia/Kolkata).
                 </p>
             </div>
 
             {/* Quick picks */}
-            <div>
+            <div className="lg:col-start-1 rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-4">
                 <p className="text-sm font-medium text-[var(--text)] mb-3">Quick picks</p>
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-wrap gap-2">
                     {quickPicks.map(({ label, build }) => (
                         <button
                             key={label}
                             type="button"
-                            onClick={() => onScheduleChange(toLocalInputValue(build()))}
-                            className="px-4 py-2.5 rounded-full border border-[var(--border)] bg-[var(--surface)] text-sm text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                            onClick={() => onScheduleChange(toIstInputValue(build()))}
+                            className="px-3 py-2 rounded-full border border-[var(--border)] bg-[var(--bg)] text-xs text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
                         >
                             {label}
                         </button>
@@ -127,13 +135,13 @@ const StepSchedule = ({
 
             {/* WhatsApp approval (optional) — only shown when the server has the channel configured */}
             {approvalEnabled && (
-                <div className="max-w-md rounded-2xl bg-[var(--bg)] border border-[var(--border)] p-6">
+                <div className="lg:col-start-2 lg:row-start-1 lg:row-span-2 rounded-2xl bg-[var(--bg)] border border-[var(--border)] p-5">
                     <label htmlFor="approver-phones" className="flex items-center gap-2 text-sm font-medium text-[var(--text)] mb-1">
                         <MessageCircle className="h-4 w-4 text-[var(--accent)]" />
                         WhatsApp approval <span className="text-xs font-normal text-[var(--muted)]">(optional)</span>
                     </label>
                     <p className="text-xs text-[var(--muted)] mb-3 leading-relaxed">
-                        Enter your or your client?s WhatsApp number for reviewing posts. Each number gets the post on WhatsApp with Approve / Reject buttons. The post
+                        Enter your or your client&apos;s WhatsApp number for reviewing posts. Each number gets the post on WhatsApp with Approve / Reject buttons. The post
                         is held until someone approves; the first decision wins.
                     </p>
                     <input
@@ -155,7 +163,7 @@ const StepSchedule = ({
                             Reuse these numbers next time
                         </label>
                         <button type="button" disabled={savingApprovers} onClick={onSaveApprovers} className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--text)] disabled:opacity-50">
-                            {savingApprovers ? 'Saving?' : 'Save approval numbers'}
+                            {savingApprovers ? 'Saving…' : 'Save approval numbers'}
                         </button>
                         <p className="text-xs text-[var(--muted)]">Saved for this workspace. Clear the field to skip approval for this post. Uncheck reuse and save to stop filling numbers automatically.</p>
                     </div>
@@ -191,6 +199,7 @@ const StepSchedule = ({
                     )}
                 </div>
             )}
+            </div>
         </div>
     );
 };

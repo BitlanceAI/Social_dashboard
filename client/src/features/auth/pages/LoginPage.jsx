@@ -13,13 +13,16 @@ const LoginPage = () => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
 
     const handleLogin = async (e) => {
         e.preventDefault();
+        if (loading) return;
+        setErrorMessage('');
         setLoading(true);
 
         try {
-            const { error } = await signIn({ email, password });
+            const { error } = await signIn({ email: email.trim(), password });
             if (error) throw error;
             trackLogin('email');
             toast.success("Welcome back! 👋");
@@ -37,13 +40,7 @@ const LoginPage = () => {
                 ? "Oops! Incorrect email or password. Please try again."
                 : error.message;
             trackLoginError(message);
-            toast.error(message, {
-                style: {
-                    borderRadius: '10px',
-                    background: '#333',
-                    color: '#fff',
-                },
-            });
+            setErrorMessage(message || 'Unable to log in. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -57,6 +54,7 @@ const LoginPage = () => {
             setPassword={setPassword}
             handleSubmit={handleLogin}
             loading={loading}
+            error={errorMessage}
         />
     );
 };
