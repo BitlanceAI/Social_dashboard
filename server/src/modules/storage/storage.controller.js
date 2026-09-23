@@ -133,12 +133,11 @@ export const quickSchedule = async (req, res) => {
             return res.status(400).json({ success: false, error: 'Invalid scheduledTime' });
         }
 
-        // Insert the post row
         const row = {
             workspace_id: req.workspaceId,
             user_id: req.user.id,
             page_id: targetId,
-            page_name: targetId,   // will be resolved to name by the caller if desired
+            page_name: targetId,
             provider,
             platforms: platforms,
             content: content || '',
@@ -148,6 +147,32 @@ export const quickSchedule = async (req, res) => {
             status: hasApprovers ? 'pending_approval' : 'pending',
             ...(phones.length ? { approver_phones: phones } : {}),
         };
+
+        if (provider === 'meta') {
+            const { data: conn } = await supabaseAdmin
+                .from('meta_connections')
+                .select('id, pages')
+                .eq('workspace_id', req.workspaceId)
+                .eq('is_active', true)
+                .single();
+            if (!conn) {
+                return res.status(400).json({ success: false, error: 'No active Meta connection' });
+            }
+            row.meta_connection_id = conn.id;
+            const page = (conn.pages || []).find((p) => String(p.id) === String(targetId));
+            if (page) row.page_name = page.name;
+        } else if (provider === 'linkedin') {
+            const { data: conn } = await supabaseAdmin
+                .from('linkedin_connections')
+                .select('id')
+                .eq('workspace_id', req.workspaceId)
+                .eq('is_active', true)
+                .single();
+            if (!conn) {
+                return res.status(400).json({ success: false, error: 'No active LinkedIn connection' });
+            }
+            row.linkedin_connection_id = conn.id;
+        }
 
         const { data: post, error: insertError } = await supabaseAdmin
             .from('scheduled_posts')
