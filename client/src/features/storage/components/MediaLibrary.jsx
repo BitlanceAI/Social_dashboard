@@ -98,6 +98,55 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
         ? media.slice(safeCompactPage * pageSize, safeCompactPage * pageSize + pageSize)
         : media;
 
+    const scheduledMedia = visibleMedia.filter((m) => m.is_scheduled);
+    const notScheduledMedia = visibleMedia.filter((m) => !m.is_scheduled);
+
+    const renderMediaGrid = (items) => (
+        <div className={`grid gap-3 ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'}`}>
+            {items.map((item) => {
+                const isVideo = item.mime_type?.startsWith('video/');
+                return (
+                    <div
+                        key={item.id}
+                        onClick={onPick ? () => onPick(item) : () => setPreviewItem(item)}
+                        className="group relative rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden cursor-pointer hover:border-[var(--accent)] transition-colors"
+                    >
+                        <div className="aspect-square bg-[var(--surface-2)] flex items-center justify-center overflow-hidden">
+                            {isVideo ? (
+                                <Film className="h-8 w-8 text-[var(--muted)]" />
+                            ) : (
+                                <img src={item.url} alt={item.file_name} loading="lazy" className="w-full h-full object-cover" />
+                            )}
+                        </div>
+                        <div className="px-2.5 py-2">
+                            <span className="block text-[11px] truncate">{item.file_name}</span>
+                            <span className="block text-[10px] font-mono text-[var(--muted)]">{fmtBytes(item.size_bytes)}</span>
+                        </div>
+                        <div className="absolute top-1.5 right-1.5 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setScheduleItem(item); }}
+                                className="p-1.5 rounded-lg bg-[var(--bg)]/80 text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
+                                title="Quick Schedule"
+                            >
+                                <CalendarClock className="h-3.5 w-3.5" />
+                            </button>
+
+                            {!onPick && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleDelete(item); }}
+                                    className="p-1.5 rounded-lg bg-[var(--bg)]/80 text-[var(--muted)] hover:text-[#F87171] transition-all"
+                                    title="Delete"
+                                >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+
     return (
         <div>
             <input
@@ -135,50 +184,19 @@ const MediaLibrary = ({ onPick, onChanged, compact = false }) => {
                     Nothing stored yet — files you upload here can be reused in any post.
                 </div>
             ) : (
-                <div className={`grid gap-3 ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'}`}>
-                    {visibleMedia.map((item) => {
-                        const isVideo = item.mime_type?.startsWith('video/');
-                        return (
-                            <div
-                                key={item.id}
-                                onClick={onPick ? () => onPick(item) : () => setPreviewItem(item)}
-                                className="group relative rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden cursor-pointer hover:border-[var(--accent)] transition-colors"
-                            >
-                                <div className="aspect-square bg-[var(--surface-2)] flex items-center justify-center overflow-hidden">
-                                    {isVideo ? (
-                                        <Film className="h-8 w-8 text-[var(--muted)]" />
-                                    ) : (
-                                        <img src={item.url} alt={item.file_name} loading="lazy" className="w-full h-full object-cover" />
-                                    )}
-                                </div>
-                                <div className="px-2.5 py-2">
-                                    <span className="block text-[11px] truncate">{item.file_name}</span>
-                                    <span className="block text-[10px] font-mono text-[var(--muted)]">{fmtBytes(item.size_bytes)}</span>
-                                </div>
-                                {/* Action buttons (shown on hover) */}
-                                <div className="absolute top-1.5 right-1.5 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                    {/* Quick Schedule */}
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); setScheduleItem(item); }}
-                                        className="p-1.5 rounded-lg bg-[var(--bg)]/80 text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
-                                        title="Quick Schedule"
-                                    >
-                                        <CalendarClock className="h-3.5 w-3.5" />
-                                    </button>
-
-                                    {!onPick && (
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleDelete(item); }}
-                                            className="p-1.5 rounded-lg bg-[var(--bg)]/80 text-[var(--muted)] hover:text-[#F87171] transition-all"
-                                            title="Delete"
-                                        >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })}
+                <div className="space-y-6">
+                    {scheduledMedia.length > 0 && (
+                        <div>
+                            <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Scheduled</h4>
+                            {renderMediaGrid(scheduledMedia)}
+                        </div>
+                    )}
+                    {notScheduledMedia.length > 0 && (
+                        <div>
+                            <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Not Scheduled</h4>
+                            {renderMediaGrid(notScheduledMedia)}
+                        </div>
+                    )}
                 </div>
             )}
 
