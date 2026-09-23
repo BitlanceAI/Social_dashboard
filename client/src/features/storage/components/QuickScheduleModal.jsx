@@ -62,8 +62,8 @@ const QuickScheduleModal = ({ item, onClose, onSuccess }) => {
 
             // Fetch Meta pages and LinkedIn actors in parallel
             const [metaRes, liRes] = await Promise.allSettled([
-                fetch(`${API_BASE_URL}/api/meta/pages`, { headers }).then(r => r.json()),
-                fetch(`${API_BASE_URL}/api/linkedin/actors`, { headers }).then(r => r.json()),
+                fetch(`${API_BASE_URL}/api/meta/connection`, { headers }).then(r => r.json()),
+                fetch(`${API_BASE_URL}/api/linkedin/connection`, { headers }).then(r => r.json()),
             ]);
 
             const metaTargets = metaRes.status === 'fulfilled' && metaRes.value?.pages
