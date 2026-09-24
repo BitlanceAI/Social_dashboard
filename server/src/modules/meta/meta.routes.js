@@ -904,7 +904,7 @@ router.post('/posts/publish', async (req, res) => {
                 mediaUrls
             });
             results.facebook = fb.success
-                ? { success: true, postId: fb.data.id || fb.data.post_id }
+                ? { success: true, postId: fb.data.post_id || fb.data.id }
                 : { success: false, error: fb.error };
         }
 

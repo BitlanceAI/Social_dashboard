@@ -1043,7 +1043,21 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
         raw: p,
     }));
 
-    const livePostIds = new Set(liveHistoryItems.map((i) => i.raw?.id).filter(Boolean));
+    const matchesLivePost = (platform, id, pageId) => id && liveHistoryItems.some(item => {
+        if (item.platform !== platform) return false;
+        const liveId = String(item.raw?.id || '');
+        if (liveId === String(id)) return true;
+        // Older Facebook photo publishes stored the unprefixed object ID.
+        if (platform !== 'facebook' || String(item.raw?.pageId) !== String(pageId)) return false;
+        if (liveId === `${pageId}_${id}`) return true;
+        try {
+            const url = new URL(item.permalink);
+            return url.searchParams.get('fbid') === String(id)
+                || url.searchParams.get('story_fbid') === String(id);
+        } catch {
+            return false;
+        }
+    });
 
     const dbHistoryItems = (scheduledPosts || []).flatMap((p) => {
         const isLinkedIn = p.provider === 'linkedin';
@@ -1057,9 +1071,28 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
         else if (p.status === 'published') status = 'published';
         else return []; // cancelled etc. never surface
 
-        // Only skip Meta published rows if they ALREADY exist in liveHistoryItems to avoid duplicate display
-        if (status === 'published' && !isLinkedIn && p.meta_post_id && livePostIds.has(p.meta_post_id)) {
-            return [];
+        // Represent each delivery separately: a successful Facebook delivery
+        // must not hide an Instagram failure or its error message.
+        if (status === 'published' && !isLinkedIn) {
+            return platforms.flatMap((platform, index) => {
+                const result = p.publish_results?.[platform];
+                const failed = result?.success === false;
+                const postId = result?.postId || (index === 0 ? p.meta_post_id : null);
+                if (!failed && matchesLivePost(platform, postId, p.page_id)) return [];
+                return [{
+                    key: `db-${p.id}-${platform}`, source: 'db',
+                    platforms: [platform], platform,
+                    status: failed ? 'failed' : 'published',
+                    message: p.content,
+                    mediaUrl: p.media_urls?.[0] || null,
+                    pageName: platform === 'instagram' ? `${p.page_name} · Instagram` : p.page_name,
+                    when: p.published_at || p.scheduled_time,
+                    permalink: failed ? null : result?.permalink
+                        || (platform === 'facebook' && postId ? `https://facebook.com/${postId}` : null),
+                    error: failed ? result.error || p.error_message || 'Publishing failed' : null,
+                    raw: p,
+                }];
+            });
         }
 
         const permalink = p.publish_results?.facebook?.permalink

@@ -291,7 +291,7 @@ const publishViaMeta = async (post, platforms) => {
         });
 
         if (fb.success) {
-            const id = fb.data.id || fb.data.post_id;
+            const id = fb.data.post_id || fb.data.id;
             results.facebook = { success: true, postId: id };
             publishedIds.push(id);
         } else {
