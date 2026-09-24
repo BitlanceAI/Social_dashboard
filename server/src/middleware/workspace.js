@@ -19,6 +19,21 @@ import '../config/env.js';
 
 import { supabaseAdmin } from '../config/supabase.js';
 
+const CLIENT_MODULES = new Set(['/api/content', '/api/reports', '/api/brand', '/api/push']);
+
+const finishWorkspaceResolution = (req, res, next, membership) => {
+    req.workspace = { id: membership.workspace_id, role: membership.role };
+    req.workspaceId = membership.workspace_id;
+    if (membership.role === 'client' && !CLIENT_MODULES.has(req.baseUrl)) {
+        return res.status(403).json({
+            success: false,
+            error: 'This area is not available to client portal users',
+            code: 'CLIENT_PORTAL_ONLY',
+        });
+    }
+    return next();
+};
+
 export const resolveWorkspace = async (req, res, next) => {
     try {
         if (!supabaseAdmin) {
@@ -46,9 +61,7 @@ export const resolveWorkspace = async (req, res, next) => {
                 });
             }
 
-            req.workspace = { id: membership.workspace_id, role: membership.role };
-            req.workspaceId = membership.workspace_id;
-            return next();
+            return finishWorkspaceResolution(req, res, next, membership);
         }
 
         // No header: resolve (and create on first use) the default workspace.
@@ -65,10 +78,16 @@ export const resolveWorkspace = async (req, res, next) => {
             });
         }
 
-        // The RPC guarantees an owner membership row alongside the workspace.
-        req.workspace = { id: workspaceId, role: 'owner' };
-        req.workspaceId = workspaceId;
-        return next();
+        // Resolve the real role. The workspace may be an invited client's
+        // default, so assuming owner here would be a privilege escalation.
+        const { data: membership, error: membershipError } = await supabaseAdmin
+            .from('workspace_members')
+            .select('workspace_id, role')
+            .eq('workspace_id', workspaceId)
+            .eq('user_id', req.user.id)
+            .single();
+        if (membershipError) throw membershipError;
+        return finishWorkspaceResolution(req, res, next, membership);
     } catch (error) {
         console.error('[Workspace] Resolution failed:', error);
         return res.status(500).json({ success: false, error: 'Workspace resolution failed' });
@@ -94,6 +113,34 @@ export const requireWorkspaceRole = (...roles) => (req, res, next) => {
         });
     }
 
+    return next();
+};
+
+const ROLE_CAPABILITIES = Object.freeze({
+    owner: ['*'],
+    admin: ['content.*', 'reports.view', 'brand.manage', 'connections.manage', 'members.manage'],
+    member: ['content.view', 'content.create', 'content.edit', 'content.submit', 'content.comment', 'content.publish', 'reports.view'],
+    client: ['content.view', 'content.comment', 'content.approve', 'reports.view'],
+});
+
+const matchesCapability = (granted, requested) => granted === '*'
+    || granted === requested
+    || (granted.endsWith('.*') && requested.startsWith(granted.slice(0, -1)));
+
+export const hasWorkspaceCapability = (role, capability) =>
+    (ROLE_CAPABILITIES[role] || []).some((granted) => matchesCapability(granted, capability));
+
+export const requireWorkspaceCapability = (capability) => (req, res, next) => {
+    if (!req.workspace) {
+        return res.status(500).json({ success: false, error: 'Workspace not resolved' });
+    }
+    if (!hasWorkspaceCapability(req.workspace.role, capability)) {
+        return res.status(403).json({
+            success: false,
+            error: 'You do not have permission to perform this workspace action',
+            code: 'INSUFFICIENT_CAPABILITY',
+        });
+    }
     return next();
 };
 

@@ -28,6 +28,9 @@ import aiRoutes from './modules/ai/ai.routes.js';
 import whatsappRoutes from './modules/whatsapp/whatsapp.routes.js';
 import approvalRoutes from './modules/approvals/approval.routes.js';
 import pipelineRoutes from './modules/pipelines/pipeline.routes.js';
+import contentRoutes from './modules/content/content.routes.js';
+import brandRoutes from './modules/brand/brand.routes.js';
+import reportRoutes from './modules/reports/reports.routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -67,6 +70,9 @@ app.use('/api/ai', aiRoutes); // AI copywriting (post captions via Perplexity)
 app.use('/api/whatsapp', whatsappRoutes); // WhatsApp Cloud API webhook (approval button taps) + status
 app.use('/api/approvals', approvalRoutes); // post approval: saved approvers, dashboard approve/reject/resend
 app.use('/api/pipelines', pipelineRoutes); // AI content pipelines & auto-poster workflow
+app.use('/api/content', contentRoutes); // agency content calendar, versions and client review
+app.use('/api/brand', brandRoutes); // workspace client identity and brand rules
+app.use('/api/reports', reportRoutes); // client-safe delivery reporting
 
 
 app.get('/health', (req, res) => {

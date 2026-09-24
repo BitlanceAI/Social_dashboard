@@ -9,7 +9,7 @@ import {
 
 const router = express.Router();
 
-router.use(protect);
+router.use(protect, resolveWorkspace);
 
 router.get('/config', getConfig);
 router.get('/me', getMe);
@@ -22,7 +22,7 @@ router.post('/media', postMediaUpload.array('files', 10), uploadMedia);
 router.delete('/media/:id', deleteMedia);
 
 // Quick-schedule a library file as a post (requires workspace context)
-router.post('/quick-schedule', resolveWorkspace, quickSchedule);
+router.post('/quick-schedule', quickSchedule);
 
 export default router;
 

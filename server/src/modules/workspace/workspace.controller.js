@@ -15,7 +15,7 @@ import { supabaseAdmin as supabase } from '../../config/supabase.js';
 import { purgeWorkspaceMedia } from '../storage/storage.service.js';
 import { wouldExceed } from '../billing/billing.service.js';
 
-const ROLES = ['owner', 'admin', 'member'];
+const ROLES = ['owner', 'admin', 'member', 'client'];
 
 /** The caller's role in a workspace, or null when they are not a member. */
 const roleOf = async (workspaceId, userId) => {
@@ -202,10 +202,23 @@ export const listMembers = async (req, res) => {
 
         const { data, error } = await supabase
             .from('workspace_members')
-            .select('user_id, role, created_at, users ( email, name )')
+            .select('user_id, role, created_at')
             .eq('workspace_id', id);
 
         if (error) throw error;
+
+        // Membership references auth.users, not public.users, so PostgREST
+        // cannot embed public profiles. Fetch only this roster's profiles.
+        const memberIds = [...new Set((data || []).map((member) => member.user_id))];
+        const profiles = new Map();
+        if (memberIds.length) {
+            const { data: users, error: profileError } = await supabase
+                .from('users')
+                .select('id, email, name')
+                .in('id', memberIds);
+            if (profileError) throw profileError;
+            for (const user of users || []) profiles.set(user.id, user);
+        }
 
         res.json({
             success: true,
@@ -213,8 +226,8 @@ export const listMembers = async (req, res) => {
                 userId: m.user_id,
                 role: m.role,
                 joinedAt: m.created_at,
-                email: m.users?.email ?? null,
-                name: m.users?.name ?? null,
+                email: profiles.get(m.user_id)?.email ?? null,
+                name: profiles.get(m.user_id)?.name ?? null,
             })),
         });
     } catch (error) {
@@ -324,7 +337,8 @@ export const createInvite = async (req, res) => {
         if (!await requireRole(req, res, id, ['owner', 'admin'])) return;
 
         const email = (req.body?.email || '').trim().toLowerCase();
-        const role = req.body?.role === 'admin' ? 'admin' : 'member';
+        const requestedRole = req.body?.role;
+        const role = ['admin', 'member', 'client'].includes(requestedRole) ? requestedRole : 'member';
 
         if (!email || !email.includes('@')) {
             return res.status(400).json({ error: 'A valid email is required' });

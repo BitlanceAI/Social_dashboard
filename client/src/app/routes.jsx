@@ -15,6 +15,8 @@ const DataDeletionPage = lazy(() => import('@/features/legal/pages/DataDeletionP
 const AdminPanelPage   = lazy(() => import('@/features/admin/pages/AdminPanelPage'));
 const StoragePage      = lazy(() => import('@/features/storage/pages/StoragePage'));
 const BillingPage      = lazy(() => import('@/features/billing/pages/BillingPage'));
+const ClientPortalPage = lazy(() => import('@/features/client-portal/pages/ClientPortalPage'));
+const AcceptInvitePage = lazy(() => import('@/features/client-portal/pages/AcceptInvitePage'));
 
 const guarded = (element) => <AuthGuard>{element}</AuthGuard>;
 
@@ -44,6 +46,10 @@ export const routes = [
 
   // Subscription billing (Razorpay)
   { path: '/billing', element: guarded(<BillingPage />) },
+
+  // Agency editorial calendar and restricted client review room
+  { path: '/portal', element: guarded(<ClientPortalPage />) },
+  { path: '/invite/:token', element: guarded(<AcceptInvitePage />) },
 
   // Legal — linked from the Meta app dashboard; both are required for Meta App Review
   { path: '/privacy-policy', element: <PrivacyPolicy /> },

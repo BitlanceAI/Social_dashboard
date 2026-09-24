@@ -19,6 +19,7 @@ import {
     Moon,
     Bot,
     ChevronUp,
+    CalendarRange,
 } from 'lucide-react';
 
 /**
@@ -182,6 +183,11 @@ const DashboardSidebar = ({
                     )}
                 </div>
             </nav>
+
+            <Link to="/portal" className="mt-4 flex items-center gap-3 border border-[var(--border)] px-3 py-2.5 text-sm font-semibold text-[var(--text)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]">
+                <CalendarRange className="h-4 w-4 shrink-0" />
+                Client portal
+            </Link>
 
             {/* Account menu */}
             <div ref={profileMenuRef} className="relative mt-auto pt-6">
