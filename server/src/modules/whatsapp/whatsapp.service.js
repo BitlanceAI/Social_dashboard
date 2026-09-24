@@ -44,11 +44,17 @@ export const isWhatsAppEnabled = () => {
 
 // ── Phone helpers ─────────────────────────────────────────────────────────
 
-/** Normalize a WhatsApp number: 10-digit Indian → 91-prefixed, else strip non-digits. */
+/**
+ * Normalize a WhatsApp number to digits with a country code.
+ * Indian numbers may be entered either as a 10-digit mobile number or with
+ * the domestic trunk prefix (0 + 10 digits); WhatsApp webhooks use 91 + 10
+ * digits, so both local forms must resolve to that same canonical value.
+ */
 export const cleanPhone = (p) => {
     const digits = String(p || '').replace(/\D/g, '');
     if (!digits) return null;
     if (digits.length < 7 || digits.length > 15) return null;
+    if (/^0[6-9]\d{9}$/.test(digits)) return `91${digits.slice(1)}`;
     return digits.length === 10 ? `91${digits}` : digits;
 };
 
@@ -65,7 +71,7 @@ export const cleanPhones = (input) => {
 /** Approver numbers on a scheduled_posts row, normalized and deduped. */
 export const rowApproverPhones = (row) => {
     const raw = Array.isArray(row?.approver_phones) ? row.approver_phones : [];
-    return [...new Set(raw.map((p) => String(p || '').replace(/\D/g, '')).filter(Boolean))];
+    return [...new Set(raw.map(cleanPhone).filter(Boolean))];
 };
 
 const isVideoUrl = (url) =>

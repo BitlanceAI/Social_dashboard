@@ -328,8 +328,6 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
 
             if (data.connected && data.isValid) {
                 setConnection(data);
-                // Fresh connection: ask which Pages to actually use
-                if (data.needsPageSelection) setShowPagePicker(true);
             } else {
                 setConnection(null);
                 // If it was previously connected but now isn't valid, show toast
@@ -618,11 +616,11 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                     await checkConnection();
                     return;
                 }
-                // Do NOT announce success yet. After connecting, ALWAYS open the
-                // Page picker so the user chooses (or re-confirms) their Pages —
-                // on a reconnect the server keeps the old selection, so the
-                // picker would not open on its own. The "Connected N profiles"
-                // toast fires only after they save in handleSavePageSelection.
+                // Do NOT announce success yet. Open the Page picker only as the
+                // next step of this completed OAuth flow. A normal connection
+                // check also runs on every page load, but must never reopen the
+                // picker after a refresh. The "Connected N profiles" toast
+                // fires only after they save in handleSavePageSelection.
                 await checkConnection();
                 // Clear the URL to preventing token leakage/re-submission
                 window.history.replaceState({}, '', '/socialdashboad');
