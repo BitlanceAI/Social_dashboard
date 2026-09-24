@@ -65,6 +65,8 @@ Ai-agents/
 seo-agent-video/
 seo-landing-page/
 reports/
+!server/src/modules/reports/
+!server/src/modules/reports/**
 graphic-agents/
 outputs/
 Bitlance_Automation/

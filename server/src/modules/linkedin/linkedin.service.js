@@ -443,7 +443,7 @@ class LinkedInService {
         if (!result.success) return result;
 
         const d = result.data || {};
-        const likes = Object.values(d.reactionSummaries || {})
+        const likes = d.reactionSummaries == null ? null : Object.values(d.reactionSummaries)
             .reduce((total, r) => total + (r?.count || 0), 0);
 
         return {

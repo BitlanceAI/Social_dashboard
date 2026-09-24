@@ -10,7 +10,7 @@ const headers = async (workspaceId) => {
   };
 };
 
-const request = async (path, workspaceId, options = {}) => {
+export const request = async (path, workspaceId, options = {}) => {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: await headers(workspaceId),
@@ -21,8 +21,8 @@ const request = async (path, workspaceId, options = {}) => {
   return data;
 };
 
-export const getCalendar = (workspaceId, from, to) => request(
-  `/api/content?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+export const getCalendar = (workspaceId, from, to, campaignId = '', pillarId = '') => request(
+  `/api/content?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&campaignId=${encodeURIComponent(campaignId)}&pillarId=${encodeURIComponent(pillarId)}`,
   workspaceId,
 );
 export const getContentItem = (workspaceId, id) => request(`/api/content/${id}`, workspaceId);
@@ -41,6 +41,15 @@ export const getWorkspaceMembers = (workspaceId) => request(`/api/workspaces/${w
 export const getWorkspaceInvites = (workspaceId) => request(`/api/workspaces/${workspaceId}/invites`, null);
 export const inviteClient = (workspaceId, email) => request(`/api/workspaces/${workspaceId}/invites`, null, { method: 'POST', body: { email, role: 'client' } });
 export const saveBrand = (workspaceId, body) => request('/api/brand', workspaceId, { method: 'PUT', body });
+export const uploadBriefAttachment = async (workspaceId, briefId, file) => {
+  const auth = await headers(workspaceId);
+  delete auth['Content-Type'];
+  const body = new FormData(); body.append('file', file);
+  const response = await fetch(`${API_BASE_URL}/api/briefs/${briefId}/attachments`, { method: 'POST', headers: auth, body });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Upload failed');
+  return data;
+};
 export const getConnectedDestinations = async (workspaceId) => {
   const [meta, linkedin] = await Promise.all([
     request('/api/meta/connection', workspaceId),

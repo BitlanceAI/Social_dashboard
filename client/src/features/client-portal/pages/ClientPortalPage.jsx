@@ -5,12 +5,14 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+import { useAuth } from '@/features/auth';
+import { BriefsPanel, CampaignsPanel, ReportAutomationPanel, ClassificationSelectors } from '../components/GrowthPanels';
 import { useWorkspace } from '@/features/workspace';
 import Logo from '@/shared/components/layout/Logo';
 import {
   addContentComment, contentAction, createContentItem, createContentVersion,
   getBrand, getCalendar, getContentItem, getReport, getWorkspaceInvites,
-  getWorkspaceMembers, getConnectedDestinations, inviteClient, saveBrand,
+  getWorkspaceMembers, getConnectedDestinations, inviteClient, saveBrand, request,
 } from '@/features/client-portal/lib/clientPortalApi';
 
 const STATUS = {
@@ -36,10 +38,10 @@ function Metric({ label, value, tone = 'var(--text)' }) {
   return <div className="border-l border-[var(--border)] pl-4"><div className="text-3xl font-black tracking-[-0.05em]" style={{ color: tone }}>{value}</div><div className="mt-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">{label}</div></div>;
 }
 
-function NewContentForm({ onClose, onSave, workspaceId }) {
+function NewContentForm({ onClose, onSave, workspaceId, brief }) {
   const [form, setForm] = useState(() => {
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1); tomorrow.setMinutes(0, 0, 0);
-    return { title: '', caption: '', destinationIndex: '', plannedFor: tomorrow.toISOString().slice(0, 16) };
+    return { title: brief?.title || '', caption: brief?.instructions || '', campaignId: brief?.campaign_id || '', pillarId: '', destinationIndex: '', plannedFor: new Date(tomorrow.getTime() - tomorrow.getTimezoneOffset() * 60000).toISOString().slice(0, 16) };
   });
   const [saving, setSaving] = useState(false);
   const [destinations, setDestinations] = useState([]);
@@ -60,18 +62,18 @@ function NewContentForm({ onClose, onSave, workspaceId }) {
   const submit = async (event) => {
     event.preventDefault();
     const selected = destinations[Number(form.destinationIndex)];
-    if (!selected) return;
+    if (form.destinationIndex === '' || !selected) return;
     setSaving(true);
     try {
       await onSave({
-        title: form.title, caption: form.caption, provider: selected.provider,
+        campaignId: form.campaignId, pillarId: form.pillarId, title: form.title, caption: form.caption, provider: selected.provider,
         plannedFor: new Date(form.plannedFor).toISOString(),
         destination: selected.provider === 'meta'
           ? { pageId: selected.id, pageName: selected.name, platforms: selected.platforms }
           : { actorId: selected.id, actorName: selected.name, platforms: selected.platforms },
       });
       onClose();
-    } finally { setSaving(false); }
+    } catch (error) { toast.error(error.message); } finally { setSaving(false); }
   };
   return <form onSubmit={submit} className="space-y-5">
     <div><label className="portal-label">Working title</label><input className="portal-input" value={form.title} onChange={set('title')} placeholder="October product story" required /></div>
@@ -80,6 +82,7 @@ function NewContentForm({ onClose, onSave, workspaceId }) {
       <div><label className="portal-label" htmlFor="portal-destination">Connected account</label><select id="portal-destination" className="portal-input" value={form.destinationIndex} onChange={set('destinationIndex')} required disabled={loadingDestinations || !destinations.length}><option value="">{loadingDestinations ? 'Loading accounts…' : 'Select an account'}</option>{destinations.map((destination, index) => <option key={`${destination.provider}-${destination.id}-${destination.type}`} value={index}>{destination.name} · {destination.type} · {destination.id}</option>)}</select></div>
       <div><label className="portal-label">Planned time</label><input className="portal-input" type="datetime-local" value={form.plannedFor} onChange={set('plannedFor')} required /></div>
     </div>
+    <ClassificationSelectors workspaceId={workspaceId} campaignId={form.campaignId} pillarId={form.pillarId} onCampaign={value => setForm(current => ({ ...current, campaignId: value }))} onPillar={value => setForm(current => ({ ...current, pillarId: value }))}/>
     {destinationError && <p role="alert" className="text-sm text-red-500">Could not load connected accounts: {destinationError}</p>}
     {!loadingDestinations && !destinationError && !destinations.length && <p className="text-sm text-[var(--muted)]">Connect and select a Facebook Page or LinkedIn profile in Social Profiles first.</p>}
     {form.destinationIndex !== '' && <p className="text-xs text-[var(--muted)]">Connected ID: {destinations[Number(form.destinationIndex)]?.id}</p>}
@@ -163,37 +166,43 @@ function PortalSettings({ workspaceId, brand, onBrandChanged }) {
 }
 
 export default function ClientPortalPage() {
+  const { user } = useAuth();
+  const [briefDraft, setBriefDraft] = useState(null);
+  const [campaignFilter, setCampaignFilter] = useState('');
+  const [pillarFilter, setPillarFilter] = useState('');
   const { activeWorkspace, activeWorkspaceId, workspaces, switchWorkspace, loading: workspaceLoading } = useWorkspace();
   const [month, setMonth] = useState(() => new Date()); const [items, setItems] = useState([]);
   const [report, setReport] = useState(null); const [brand, setBrand] = useState(null);
   const [tab, setTab] = useState('calendar'); const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null); const [creating, setCreating] = useState(false);
+  const closeDrawer = useCallback(() => setSelected(null), []);
   const range = useMemo(() => monthRange(month), [month]); const role = activeWorkspace?.role;
   const load = useCallback(async () => {
     if (!activeWorkspaceId) return;
     setLoading(true);
     try {
-      const [calendar, reportData, brandData] = await Promise.all([getCalendar(activeWorkspaceId, range.from, range.to), getReport(activeWorkspaceId, range.from, range.to), getBrand(activeWorkspaceId)]);
+      const [calendar, reportData, brandData] = await Promise.all([getCalendar(activeWorkspaceId, range.from, range.to, campaignFilter, pillarFilter), getReport(activeWorkspaceId, range.from, range.to), getBrand(activeWorkspaceId)]);
       setItems(calendar.items); setReport(reportData); setBrand(brandData.brand);
     } catch (error) { toast.error(error.message); } finally { setLoading(false); }
-  }, [activeWorkspaceId, range.from, range.to]);
+  }, [activeWorkspaceId, range.from, range.to, campaignFilter, pillarFilter]);
   useEffect(() => { const timer = setTimeout(load, 0); return () => clearTimeout(timer); }, [load]);
   const groups = useMemo(() => Object.entries(items.reduce((acc, item) => { const key = dayKey(item.planned_for); (acc[key] ||= []).push(item); return acc; }, {})), [items]);
   const moveMonth = (step) => setMonth((current) => new Date(current.getFullYear(), current.getMonth() + step, 1));
-  const saveNew = async (payload) => { await createContentItem(activeWorkspaceId, payload); toast.success('Draft created'); await load(); };
+  const saveNew = async (payload) => { if (briefDraft) await request(`/api/briefs/${briefDraft.id}/create-content`, activeWorkspaceId, { method: 'POST', body: payload }); else await createContentItem(activeWorkspaceId, payload); setBriefDraft(null); toast.success('Draft created'); await load(); };
   if (workspaceLoading || !activeWorkspace) return <div className="grid min-h-screen place-items-center bg-[var(--bg)]"><Loader2 className="animate-spin text-[var(--accent)]"/></div>;
   return <div className="portal-page min-h-screen bg-[var(--bg)] text-[var(--text)]">
-    <header className="border-b border-[var(--border)]"><div className="mx-auto flex max-w-[1480px] items-center gap-5 px-5 py-4 lg:px-10"><Logo/><span className="hidden h-5 w-px bg-[var(--border)] sm:block"/><div className="min-w-0 flex-1"><div className="truncate text-sm font-bold">{brand?.client_name || activeWorkspace.name}</div><div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">{role === 'client' ? 'Client review room' : 'Agency operations desk'}</div></div><select className="portal-input hidden max-w-52 sm:block" value={activeWorkspaceId} onChange={(e) => switchWorkspace(e.target.value)}>{workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></div></header>
+    <header className="border-b border-[var(--border)]"><div className="mx-auto flex max-w-[1480px] items-center gap-5 px-5 py-4 lg:px-10"><Logo/><span className="hidden h-5 w-px bg-[var(--border)] sm:block"/><div className="min-w-0 flex-1"><div className="truncate text-sm font-bold">{brand?.client_name || activeWorkspace.name}</div><div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">{role === 'client' ? 'Client review room' : 'Agency operations desk'}</div></div><select className="portal-input hidden max-w-52 sm:block" value={activeWorkspaceId} onChange={(e) => { setSelected(null); setCreating(false); setBriefDraft(null); setCampaignFilter(''); setPillarFilter(''); switchWorkspace(e.target.value); }}>{workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></div></header>
     <main className="mx-auto max-w-[1480px] px-5 py-8 lg:px-10 lg:py-12">
       <div className="grid gap-10 lg:grid-cols-[240px_1fr]">
-        <aside><div className="sticky top-8"><div className="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Workspace</div><h1 className="mt-3 text-4xl font-black leading-[0.95] tracking-[-0.055em]">Content<br/>control room.</h1><nav className="mt-10 space-y-1"><button className={`portal-nav ${tab === 'calendar' ? 'active' : ''}`} onClick={() => setTab('calendar')}><CalendarDays size={17}/>Calendar</button><button className={`portal-nav ${tab === 'reports' ? 'active' : ''}`} onClick={() => setTab('reports')}><BarChart3 size={17}/>Reports</button>{role !== 'client' && <button className={`portal-nav ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}><Settings2 size={17}/>Clients & brand</button>}</nav><div className="mt-10 border-t border-[var(--border)] pt-5 text-xs leading-5 text-[var(--muted)]">One clear thread from first draft to published result.</div></div></aside>
+        <aside><div className="sticky top-8"><div className="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Workspace</div><h1 className="mt-3 text-4xl font-black leading-[0.95] tracking-[-0.055em]">Content<br/>control room.</h1><nav className="mt-10 space-y-1"><button className={`portal-nav ${tab === 'requests' ? 'active' : ''}`} onClick={() => setTab('requests')}><MessageSquare size={17}/>Requests</button><button className={`portal-nav ${tab === 'campaigns' ? 'active' : ''}`} onClick={() => setTab('campaigns')}><FileText size={17}/>Campaigns & pillars</button><button className={`portal-nav ${tab === 'calendar' ? 'active' : ''}`} onClick={() => setTab('calendar')}><CalendarDays size={17}/>Calendar</button><button className={`portal-nav ${tab === 'reports' ? 'active' : ''}`} onClick={() => setTab('reports')}><BarChart3 size={17}/>Reports</button>{role !== 'client' && <button className={`portal-nav ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}><Settings2 size={17}/>Clients & brand</button>}</nav><div className="mt-10 border-t border-[var(--border)] pt-5 text-xs leading-5 text-[var(--muted)]">One clear thread from first draft to published result.</div></div></aside>
         <section className="min-w-0">
-          <div className="flex flex-wrap items-end justify-between gap-4"><div><div className="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">{tab === 'calendar' ? 'Editorial schedule' : tab === 'reports' ? 'Delivery report' : 'Workspace setup'}</div><h2 className="mt-2 text-3xl font-black tracking-[-0.045em]">{tab === 'settings' ? 'Clients & brand' : month.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</h2></div>{tab !== 'settings' && <div className="flex items-center gap-2"><button className="portal-icon" onClick={() => moveMonth(-1)} aria-label="Previous month"><ArrowLeft size={17}/></button><button className="portal-icon" onClick={() => moveMonth(1)} aria-label="Next month"><ArrowRight size={17}/></button><button className="portal-icon" onClick={load} aria-label="Refresh"><RefreshCw size={16}/></button>{role !== 'client' && tab === 'calendar' && <button className="portal-button portal-button-primary ml-2" onClick={() => setCreating(true)}><Plus size={16}/>New content</button>}</div>}</div>
-          {loading ? <div className="grid h-80 place-items-center"><Loader2 className="animate-spin text-[var(--accent)]"/></div> : tab === 'calendar' ? <div className="mt-8 border-t border-[var(--border)]">{groups.length ? groups.map(([day, dayItems]) => <div key={day} className="grid border-b border-[var(--border)] py-5 md:grid-cols-[150px_1fr]"><div className="mb-3 text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted)] md:mb-0">{niceDay(day)}</div><div className="space-y-2">{dayItems.map((item) => <button key={item.id} onClick={() => setSelected(item.id)} className="group grid w-full grid-cols-[7px_1fr_auto] items-center gap-4 border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:-translate-y-0.5 hover:border-[var(--accent)]"><i className="h-full min-h-12 rounded-full" style={{ background: STATUS[item.review_status]?.[1] }}/><div className="min-w-0"><div className="truncate font-bold">{item.title}</div><div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]"><span>{item.destination?.pageName || item.destination?.actorName || item.provider}</span><StatusBadge status={item.review_status}/></div></div><ChevronRight size={18} className="text-[var(--muted)] transition group-hover:translate-x-1 group-hover:text-[var(--accent)]"/></button>)}</div></div>) : <div className="grid min-h-80 place-items-center border-b border-[var(--border)] text-center"><div><CalendarDays className="mx-auto text-[var(--muted)]"/><h3 className="mt-4 font-bold">Nothing planned this month</h3><p className="mt-1 text-sm text-[var(--muted)]">Move to another month or create the first content item.</p></div></div>}</div> : tab === 'reports' ? <div className="mt-10"><div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4"><Metric label="All posts" value={report?.totals?.total || 0}/><Metric label="Published" value={report?.totals?.published || 0} tone="#16845B"/><Metric label="Scheduled" value={(report?.totals?.scheduled || 0) + (report?.totals?.pending || 0)} tone="#2563EB"/><Metric label="Failed" value={report?.totals?.failed || 0} tone="#DC2626"/></div><div className="mt-12 border-t border-[var(--border)]"><div className="py-5 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Recent delivery</div>{report?.recentPosts?.map((post) => <div key={post.id} className="grid gap-2 border-t border-[var(--border)] py-4 sm:grid-cols-[120px_1fr_120px]"><StatusBadge status={post.status}/><div className="truncate text-sm">{post.content}</div><time className="text-xs text-[var(--muted)]">{new Date(post.scheduled_time).toLocaleDateString('en-IN')}</time></div>)}</div><button className="portal-button mt-8" onClick={() => window.print()}><FileText size={15}/>Print / Save PDF</button></div> : <PortalSettings workspaceId={activeWorkspaceId} brand={brand} onBrandChanged={setBrand}/>} 
+          <div className="flex flex-wrap items-end justify-between gap-4"><div><div className="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">{tab === 'calendar' ? 'Editorial schedule' : tab === 'reports' ? 'Delivery report' : 'Workspace setup'}</div><h2 className="mt-2 text-3xl font-black tracking-[-0.045em]">{tab === 'requests' ? 'Content requests' : tab === 'campaigns' ? 'Campaigns & pillars' : tab === 'settings' ? 'Clients & brand' : month.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</h2></div>{['calendar', 'reports'].includes(tab) && <div className="flex items-center gap-2"><button className="portal-icon" onClick={() => moveMonth(-1)} aria-label="Previous month"><ArrowLeft size={17}/></button><button className="portal-icon" onClick={() => moveMonth(1)} aria-label="Next month"><ArrowRight size={17}/></button><button className="portal-icon" onClick={load} aria-label="Refresh"><RefreshCw size={16}/></button>{role !== 'client' && tab === 'calendar' && <button className="portal-button portal-button-primary ml-2" onClick={() => { setBriefDraft(null); setCreating(true); }}><Plus size={16}/>New content</button>}</div>}</div>
+          {tab === 'calendar' && <div className="mt-5"><ClassificationSelectors key={activeWorkspaceId} workspaceId={activeWorkspaceId} campaignId={campaignFilter} pillarId={pillarFilter} onCampaign={setCampaignFilter} onPillar={setPillarFilter} filtering/></div>}
+          {tab === 'requests' ? <BriefsPanel key={activeWorkspaceId} workspaceId={activeWorkspaceId} role={role} userId={user?.id} onCreateDraft={brief => { setBriefDraft(brief); setCreating(true); }} onOpenContent={setSelected}/> : tab === 'campaigns' ? <CampaignsPanel key={activeWorkspaceId} workspaceId={activeWorkspaceId} role={role}/> : loading ? <div className="grid h-80 place-items-center"><Loader2 className="animate-spin text-[var(--accent)]"/></div> : tab === 'calendar' ? <div className="mt-8 border-t border-[var(--border)]">{groups.length ? groups.map(([day, dayItems]) => <div key={day} className="grid border-b border-[var(--border)] py-5 md:grid-cols-[150px_1fr]"><div className="mb-3 text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted)] md:mb-0">{niceDay(day)}</div><div className="space-y-2">{dayItems.map((item) => <button key={item.id} onClick={() => setSelected(item.id)} className="group grid w-full grid-cols-[7px_1fr_auto] items-center gap-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:-translate-y-0.5 hover:border-[var(--accent)]"><i className="h-full min-h-12 rounded-full" style={{ background: STATUS[item.review_status]?.[1] }}/><div className="min-w-0"><div className="truncate font-bold">{item.title}</div><div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]"><span>{item.destination?.pageName || item.destination?.actorName || item.provider}</span><StatusBadge status={item.review_status}/></div></div><ChevronRight size={18} className="text-[var(--muted)] transition group-hover:translate-x-1 group-hover:text-[var(--accent)]"/></button>)}</div></div>) : <div className="grid min-h-80 place-items-center border-b border-[var(--border)] text-center"><div><CalendarDays className="mx-auto text-[var(--muted)]"/><h3 className="mt-4 font-bold">Nothing planned this month</h3><p className="mt-1 text-sm text-[var(--muted)]">Move to another month or create the first content item.</p></div></div>}</div> : tab === 'reports' ? <div className="mt-10"><div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4"><Metric label="All posts" value={report?.totals?.total || 0}/><Metric label="Published" value={report?.totals?.published || 0} tone="#16845B"/><Metric label="Scheduled" value={(report?.totals?.scheduled || 0) + (report?.totals?.pending || 0)} tone="#2563EB"/><Metric label="Failed" value={report?.totals?.failed || 0} tone="#DC2626"/></div><div className="mt-12 border-t border-[var(--border)]"><div className="py-5 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Recent delivery</div>{report?.recentPosts?.map((post) => <div key={post.id} className="grid gap-2 border-t border-[var(--border)] py-4 sm:grid-cols-[120px_1fr_120px]"><StatusBadge status={post.status}/><div className="truncate text-sm">{post.content}</div><time className="text-xs text-[var(--muted)]">{new Date(post.scheduled_time).toLocaleDateString('en-IN')}</time></div>)}</div><button className="portal-button mt-8" onClick={() => window.print()}><FileText size={15}/>Print / Save PDF</button><ReportAutomationPanel key={activeWorkspaceId} workspaceId={activeWorkspaceId} role={role}/></div> : <PortalSettings workspaceId={activeWorkspaceId} brand={brand} onBrandChanged={setBrand}/>}
         </section>
       </div>
     </main>
-    {selected && <ContentDrawer id={selected} workspaceId={activeWorkspaceId} role={role} onClose={() => setSelected(null)} onChanged={load}/>} 
-    {creating && <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4 backdrop-blur-sm" onMouseDown={(e) => e.target === e.currentTarget && setCreating(false)}><div className="w-full max-w-2xl bg-[var(--bg)] p-6 shadow-2xl sm:p-8"><div className="mb-7 flex items-center justify-between"><div><div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">New editorial item</div><h2 className="mt-1 text-2xl font-black tracking-[-0.04em]">Start with the idea.</h2></div><button className="portal-icon" onClick={() => setCreating(false)}><X size={18}/></button></div><NewContentForm workspaceId={activeWorkspaceId} onClose={() => setCreating(false)} onSave={saveNew}/></div></div>}
+    {selected && <ContentDrawer key={`${activeWorkspaceId}-${selected}`} id={selected} workspaceId={activeWorkspaceId} role={role} onClose={closeDrawer} onChanged={load}/>}
+    {creating && <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4 backdrop-blur-sm" onMouseDown={(e) => e.target === e.currentTarget && setCreating(false)}><div className="w-full max-w-2xl rounded-2xl bg-[var(--bg)] p-6 shadow-2xl sm:p-8"><div className="mb-7 flex items-center justify-between"><div><div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">New editorial item</div><h2 className="mt-1 text-2xl font-black tracking-[-0.04em]">Start with the idea.</h2></div><button className="portal-icon" onClick={() => setCreating(false)}><X size={18}/></button></div><NewContentForm key={activeWorkspaceId} brief={briefDraft} workspaceId={activeWorkspaceId} onClose={() => setCreating(false)} onSave={saveNew}/></div></div>}
   </div>;
 }

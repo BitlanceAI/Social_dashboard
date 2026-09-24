@@ -205,8 +205,7 @@ body {
 /* Agency portal — editorial operations desk */
 .portal-page {
   --portal-ink: var(--text);
-  background-image: linear-gradient(90deg, transparent 0, transparent calc(100% - 1px), color-mix(in srgb, var(--border) 45%, transparent) calc(100% - 1px));
-  background-size: 72px 100%;
+  background-image: none;
 }
 
 .portal-label {
@@ -222,7 +221,7 @@ body {
 .portal-input {
   width: 100%;
   border: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: 0.75rem;
   background: var(--surface);
   color: var(--text);
   padding: 0.72rem 0.85rem;
@@ -239,6 +238,7 @@ body {
   justify-content: center;
   gap: 0.5rem;
   border: 1px solid var(--border);
+  border-radius: 0.75rem;
   background: var(--bg);
   color: var(--text);
   font-size: 0.78rem;
@@ -258,11 +258,10 @@ body {
   width: 100%;
   justify-content: flex-start;
   border-color: transparent;
-  border-left-color: var(--border);
   padding: 0.75rem 1rem;
   color: var(--muted);
 }
-.portal-nav.active { border-left: 3px solid var(--accent); background: var(--accent-muted); color: var(--text); }
+.portal-nav.active { border-color: transparent; background: var(--accent-muted); color: var(--text); }
 
 @media print {
   .portal-page header, .portal-page aside, .portal-page button { display: none !important; }

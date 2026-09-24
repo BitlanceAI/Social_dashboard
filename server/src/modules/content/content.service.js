@@ -1,6 +1,8 @@
 import '../../config/env.js';
 
 import { supabaseAdmin as db } from '../../config/supabase.js';
+import { validateLinks } from '../agency/agency.shared.js';
+import { optionalId } from '../agency/agency.validation.js';
 
 const EDITOR_ROLES = new Set(['owner', 'admin', 'member']);
 const APPROVER_ROLES = new Set(['owner', 'admin', 'client']);
@@ -15,7 +17,7 @@ const getItem = async (workspaceId, id) => {
         .select('*, current_version:content_versions!content_items_current_version_fk(*)')
         .eq('workspace_id', workspaceId).eq('id', id).maybeSingle();
     if (error) throw error;
-    if (!data) Object.assign(new Error('Content item not found'), { status: 404 });
+    if (!data) throw Object.assign(new Error('Content item not found'), { status: 404 });
     return data;
 };
 
@@ -46,6 +48,8 @@ export const listContent = async (workspaceId, query, role) => {
         .order('id', { ascending: true })
         .limit(500);
     if (query.status) request = request.eq('review_status', query.status);
+    if (query.campaignId) request = request.eq('campaign_id', optionalId(query.campaignId));
+    if (query.pillarId) request = request.eq('pillar_id', optionalId(query.pillarId));
     if (role === 'client') request = request.in('review_status', ['client_review', 'changes_requested', 'approved', 'scheduled', 'published', 'failed']);
     const { data, error } = await request;
     if (error) throw error;
@@ -55,7 +59,7 @@ export const listContent = async (workspaceId, query, role) => {
 export const loadContent = async (workspaceId, id, role) => {
     const item = await getItem(workspaceId, id);
     if (role === 'client' && ['draft', 'internal_review'].includes(item.review_status)) {
-        Object.assign(new Error('Content item not found'), { status: 404 });
+        throw Object.assign(new Error('Content item not found'), { status: 404 });
     }
     const [{ data: versions, error: versionError }, { data: comments, error: commentError }, { data: activity, error: activityError }] = await Promise.all([
         db.from('content_versions').select('*').eq('workspace_id', workspaceId).eq('content_item_id', id).order('version_number', { ascending: false }),
@@ -73,15 +77,17 @@ export const loadContent = async (workspaceId, id, role) => {
 
 export const createContent = async (workspaceId, userId, payload) => {
     const caption = cleanText(payload.caption);
-    if (!caption) Object.assign(new Error('Caption is required'), { status: 400 });
+    if (!caption) throw Object.assign(new Error('Caption is required'), { status: 400 });
     const provider = payload.provider === 'linkedin' ? 'linkedin' : 'meta';
     const plannedFor = payload.plannedFor && !Number.isNaN(Date.parse(payload.plannedFor)) ? new Date(payload.plannedFor).toISOString() : null;
+    const links = { campaign_id: optionalId(payload.campaignId), pillar_id: optionalId(payload.pillarId), brief_id: optionalId(payload.briefId) };
+    await validateLinks(workspaceId, links);
 
     const { data: item, error } = await db.from('content_items').insert({
         workspace_id: workspaceId,
         created_by: userId,
         title: cleanText(payload.title, 160) || 'Untitled post',
-        campaign_name: cleanText(payload.campaignName, 160) || null,
+        ...links,
         provider,
         destination: payload.destination && typeof payload.destination === 'object' ? payload.destination : {},
         planned_for: plannedFor,
@@ -110,13 +116,13 @@ export const createContent = async (workspaceId, userId, payload) => {
 };
 
 export const createVersion = async (workspaceId, id, userId, role, payload) => {
-    if (!EDITOR_ROLES.has(role)) Object.assign(new Error('Only agency team members can revise content'), { status: 403 });
+    if (!EDITOR_ROLES.has(role)) throw Object.assign(new Error('Only agency team members can revise content'), { status: 403 });
     const item = await getItem(workspaceId, id);
     if (['scheduled', 'published', 'cancelled'].includes(item.review_status)) {
-        Object.assign(new Error('This content can no longer be revised'), { status: 409 });
+        throw Object.assign(new Error('This content can no longer be revised'), { status: 409 });
     }
     const caption = cleanText(payload.caption);
-    if (!caption) Object.assign(new Error('Caption is required'), { status: 400 });
+    if (!caption) throw Object.assign(new Error('Caption is required'), { status: 400 });
     const { data: latest, error: latestError } = await db.from('content_versions')
         .select('version_number').eq('content_item_id', id).order('version_number', { ascending: false }).limit(1).single();
     if (latestError) throw latestError;
@@ -152,10 +158,10 @@ export const transitionContent = async (workspaceId, id, userId, role, action, r
         cancel: { from: ['draft', 'internal_review', 'client_review', 'changes_requested', 'approved'], to: 'cancelled', roles: new Set(['owner', 'admin']) },
     };
     const rule = transitions[action];
-    if (!rule) Object.assign(new Error('Unsupported transition'), { status: 400 });
-    if (!rule.roles.has(role)) Object.assign(new Error('You cannot perform this review action'), { status: 403 });
-    if (!rule.from.includes(item.review_status)) Object.assign(new Error(`Cannot ${action.replace('_', ' ')} content that is ${item.review_status}`), { status: 409 });
-    if (action === 'request_changes' && !cleanText(reason, 4000)) Object.assign(new Error('A change request must include feedback'), { status: 400 });
+    if (!rule) throw Object.assign(new Error('Unsupported transition'), { status: 400 });
+    if (!rule.roles.has(role)) throw Object.assign(new Error('You cannot perform this review action'), { status: 403 });
+    if (!rule.from.includes(item.review_status)) throw Object.assign(new Error(`Cannot ${action.replace('_', ' ')} content that is ${item.review_status}`), { status: 409 });
+    if (action === 'request_changes' && !cleanText(reason, 4000)) throw Object.assign(new Error('A change request must include feedback'), { status: 400 });
 
     const patch = { review_status: rule.to, updated_at: new Date().toISOString() };
     if (action === 'approve') patch.approved_version_id = item.current_version_id;
@@ -164,16 +170,16 @@ export const transitionContent = async (workspaceId, id, userId, role, action, r
         .eq('id', id).eq('workspace_id', workspaceId).eq('review_status', item.review_status)
         .select().maybeSingle();
     if (error) throw error;
-    if (!data) Object.assign(new Error('Content changed while you were reviewing it. Reload and try again.'), { status: 409 });
+    if (!data) throw Object.assign(new Error('Content changed while you were reviewing it. Reload and try again.'), { status: 409 });
     await event(data, userId, action, cleanText(reason, 4000) || null);
     return data;
 };
 
 export const addComment = async (workspaceId, id, userId, role, payload) => {
     const item = await getItem(workspaceId, id);
-    if (role === 'client' && ['draft', 'internal_review'].includes(item.review_status)) Object.assign(new Error('Content item not found'), { status: 404 });
+    if (role === 'client' && ['draft', 'internal_review'].includes(item.review_status)) throw Object.assign(new Error('Content item not found'), { status: 404 });
     const body = cleanText(payload.body, 4000);
-    if (!body) Object.assign(new Error('Comment is required'), { status: 400 });
+    if (!body) throw Object.assign(new Error('Comment is required'), { status: 400 });
     const visibility = role === 'client' ? 'shared' : (payload.visibility === 'internal' ? 'internal' : 'shared');
     const { data, error } = await db.from('content_comments').insert({
         workspace_id: workspaceId, content_item_id: id, content_version_id: item.current_version_id,
@@ -185,20 +191,20 @@ export const addComment = async (workspaceId, id, userId, role, payload) => {
 };
 
 export const scheduleApprovedContent = async (workspaceId, id, userId, role) => {
-    if (!['owner', 'admin', 'member'].includes(role)) Object.assign(new Error('Clients cannot schedule content'), { status: 403 });
+    if (!['owner', 'admin', 'member'].includes(role)) throw Object.assign(new Error('Clients cannot schedule content'), { status: 403 });
     const item = await getItem(workspaceId, id);
     if (item.review_status !== 'approved' || item.current_version_id !== item.approved_version_id) {
-        Object.assign(new Error('Only the current approved version can be scheduled'), { status: 409 });
+        throw Object.assign(new Error('Only the current approved version can be scheduled'), { status: 409 });
     }
     if (!item.planned_for || new Date(item.planned_for).getTime() <= Date.now()) {
-        Object.assign(new Error('Choose a future publishing time before scheduling'), { status: 400 });
+        throw Object.assign(new Error('Choose a future publishing time before scheduling'), { status: 400 });
     }
     const destination = item.destination || {};
     const connectionTable = item.provider === 'linkedin' ? 'linkedin_connections' : 'meta_connections';
     const { data: connection, error: connectionError } = await db.from(connectionTable)
         .select('id').eq('workspace_id', workspaceId).eq('is_active', true).maybeSingle();
     if (connectionError) throw connectionError;
-    if (!connection) Object.assign(new Error(`Connect ${item.provider === 'linkedin' ? 'LinkedIn' : 'Meta'} before scheduling`), { status: 409 });
+    if (!connection) throw Object.assign(new Error(`Connect ${item.provider === 'linkedin' ? 'LinkedIn' : 'Meta'} before scheduling`), { status: 409 });
 
     const version = item.current_version;
     const row = {
@@ -219,10 +225,10 @@ export const scheduleApprovedContent = async (workspaceId, id, userId, role) => 
         content_item_id: item.id,
         content_version_id: version.id,
     };
-    if (!row.page_id) Object.assign(new Error('Choose a publishing destination before scheduling'), { status: 400 });
+    if (!row.page_id) throw Object.assign(new Error('Choose a publishing destination before scheduling'), { status: 400 });
     const { data: scheduledPost, error } = await db.from('scheduled_posts').insert(row).select().single();
     if (error) {
-        if (error.code === '23505') Object.assign(new Error('This approved version is already scheduled'), { status: 409 });
+        if (error.code === '23505') throw Object.assign(new Error('This approved version is already scheduled'), { status: 409 });
         throw error;
     }
     const { data: updated, error: updateError } = await db.from('content_items').update({

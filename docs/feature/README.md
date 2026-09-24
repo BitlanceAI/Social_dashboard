@@ -23,6 +23,7 @@ This directory documents the features currently implemented in Automation Bitlan
 | Feature | Summary |
 | --- | --- |
 | [Agency client portal](agency-client-portal-plan.md) | Architecture and implementation plan for client calendars, approvals, brand kits, and reports |
+| [Agency growth features](agency-growth-implementation-plan.md) | Plan for client briefs, campaigns and pillars, and automated reports |
 
 ## Product scope
 

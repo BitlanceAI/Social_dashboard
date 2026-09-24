@@ -672,7 +672,7 @@ class MetaService {
             metrics: {
                 likes: d.likes?.summary?.total_count ?? null,
                 comments: d.comments?.summary?.total_count ?? null,
-                shares: d.shares?.count ?? 0,
+                shares: d.shares?.count ?? null,
                 permalink: d.permalink_url || d.link || null,
                 thumbnail: d.full_picture || d.picture || null,
                 publishedAt: d.created_time || null

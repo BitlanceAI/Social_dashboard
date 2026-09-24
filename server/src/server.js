@@ -7,10 +7,12 @@ import './config/env.js';
 import app from './app.js';
 import { env } from './config/env.js';
 import { startPostScheduler } from './modules/scheduler/scheduler.service.js';
+import { startReportWorker } from './modules/reports/report.service.js';
 
 app.listen(env.port, () => {
     console.log(`Server running on port ${env.port}`);
 
     // Publishes due scheduled_posts to Facebook / Instagram
     startPostScheduler();
+    startReportWorker();
 });

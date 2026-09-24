@@ -19,7 +19,7 @@ import '../config/env.js';
 
 import { supabaseAdmin } from '../config/supabase.js';
 
-const CLIENT_MODULES = new Set(['/api/content', '/api/reports', '/api/brand', '/api/push']);
+const CLIENT_MODULES = new Set(['/api/content', '/api/reports', '/api/brand', '/api/push', '/api/briefs', '/api/campaigns', '/api/pillars']);
 
 const finishWorkspaceResolution = (req, res, next, membership) => {
     req.workspace = { id: membership.workspace_id, role: membership.role };
