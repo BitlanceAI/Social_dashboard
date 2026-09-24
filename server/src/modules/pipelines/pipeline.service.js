@@ -59,7 +59,7 @@ export const createPipeline = async (workspaceId, userId, payload) => {
         pageId = null,
         provider = 'linkedin',
         sheetUrl = null,
-        brandLogoText = 'Rahul Saini',
+        brandLogoText = '',
         captionPromptTemplate = payload.captionPromptTemplate || payload.caption_prompt_template || null,
         imagePromptTemplate = payload.imagePromptTemplate || payload.image_prompt_template || null,
         autoPublish = true,

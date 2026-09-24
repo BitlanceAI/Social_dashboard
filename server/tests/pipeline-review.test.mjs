@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createContext, SourceTextModule, SyntheticModule } from 'node:vm';
 import * as contentHelpers from '../src/shared/utils/pipeline-content.mjs';
+import * as brandHelpers from '../src/modules/pipelines/pipeline-brand.mjs';
 
 async function load(path, mocks, globals = {}) {
     mocks['../../shared/utils/pipeline-content.mjs'] = contentHelpers;
+    mocks['./pipeline-brand.mjs'] = brandHelpers;
     const context = createContext({ console, AbortSignal, process: { env: { PERPLEXITY_API_KEY: 'test' } }, ...globals });
     const module = new SourceTextModule(await readFile(new URL(path, import.meta.url), 'utf8'), { context });
     await module.link(name => {
@@ -47,9 +49,11 @@ async function executor({ phones = ['919876543210'], pipelinePhones, enabled = t
         content_queue: [{ id: 'item', pipeline_id: 'pipe', workspace_id: 'a', status: 'pending', title_hook: 'Hook' }],
         linkedin_connections: [{ id: 'li', workspace_id: 'a', is_active: true, author_urn: 'urn:li:person:123' }],
         scheduled_posts: [],
+        workspace_brand_profiles: [{ workspace_id: 'a', client_name: 'Acme', tone_of_voice: 'Clear and confident', primary_color: '#123456', secondary_color: '#fedcba' }],
     };
     const db = database(tables);
     const deliveries = [];
+    const prompts = [];
     const noPublish = class { constructor() { throw new Error('Must not publish before approval'); } };
     const api = await load('../src/modules/pipelines/pipeline_executor.service.js', {
         '../../config/env.js': {}, '../../config/supabase.js': { supabaseAdmin: db, supabase: db },
@@ -63,18 +67,23 @@ async function executor({ phones = ['919876543210'], pipelinePhones, enabled = t
         './pipeline.service.js': { addQueueItems: async () => [] },
         '../design/generation.service.js': { isOpenAIConfigured: () => false, generateImage: () => {} },
         '../../shared/storage/bunny.js': { isBunnyConfigured: () => false, bunnyUpload: () => {} },
-    }, { fetch: async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '{"caption":"Caption","hashtags":"#Tech"}' } }] }) }) });
-    return { api, tables, deliveries };
+    }, { fetch: async (_url, options) => {
+        prompts.push(JSON.parse(options.body).messages[0].content);
+        return { ok: true, json: async () => ({ choices: [{ message: { content: '{"caption":"Caption","hashtags":"#Tech"}' } }] }) };
+    } });
+    return { api, tables, deliveries, prompts };
 }
 
 test('pipeline uses workspace defaults and queues for approval without publishing', async () => {
-    const { api, tables, deliveries } = await executor();
+    const { api, tables, deliveries, prompts } = await executor();
     const result = await api.runPipeline('pipe', 'a');
     assert.equal(result.postStatus, 'pending_approval');
     assert.equal(tables.content_queue[0].status, 'pending_approval');
     assert.equal(tables.content_queue[0].scheduled_post_id, tables.scheduled_posts[0].id);
     assert.equal(deliveries.length, 1);
     assert.deepEqual(deliveries[0].approver_phones, ['919876543210']);
+    assert.match(prompts[0], /Client brand: Acme/);
+    assert.match(prompts[0], /Clear and confident/);
 });
 
 test('pipeline run denies foreign and missing workspaces before generation', async () => {

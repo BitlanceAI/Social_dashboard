@@ -23,6 +23,7 @@ import sharp from 'sharp';
 import { getDefaultApprovers, requestApproval } from '../approvals/approval.service.js';
 import { isWhatsAppEnabled } from '../whatsapp/whatsapp.service.js';
 import { addQueueItems } from './pipeline.service.js';
+import { resolvePipelineBrand, captionBrandContext, imageBrandContext } from './pipeline-brand.mjs';
 
 const getClient = () => supabaseAdmin || supabase;
 
@@ -63,13 +64,14 @@ export const generatePipelineCaption = async ({
     format,
     cta,
     customTemplate,
+    brand,
 }) => {
     const apiKey = OPENAI_API_KEY || PERPLEXITY_API_KEY;
     if (!apiKey) {
         throw new Error('Neither OPENAI_API_KEY nor PERPLEXITY_API_KEY is configured on the server');
     }
 
-    const defaultPrompt = `You write LinkedIn captions for a full-stack developer / AI automation specialist.
+    const defaultPrompt = `You write social media captions for the client brand.
 Return ONLY a JSON object with two keys: "caption" (80-150 words, first-person, short paragraphs, ends with the given CTA) and "hashtags" (5-8 hashtags as one space-separated string).
 
 Post Title: ${titleHook}
@@ -78,7 +80,7 @@ Caption Outline: ${captionOutline || titleHook}
 Format: ${format || 'Story/Insight'}
 CTA: ${cta || 'Follow for more tech insights'}`;
 
-    const prompt = customTemplate
+    const contentPrompt = customTemplate
         ? customTemplate
             .replace(/\{\{titleHook\}\}/g, titleHook)
             .replace(/\{\{contentPillar\}\}/g, contentPillar || '')
@@ -86,6 +88,8 @@ CTA: ${cta || 'Follow for more tech insights'}`;
             .replace(/\{\{format\}\}/g, format || '')
             .replace(/\{\{cta\}\}/g, cta || '')
         : defaultPrompt;
+    const context = captionBrandContext(brand);
+    const prompt = context ? `${contentPrompt}\n\nBrand context for the final caption (use the client brand and voice even if a legacy template names another persona):\n${context}` : contentPrompt;
 
     const isPerplexity = !OPENAI_API_KEY && Boolean(PERPLEXITY_API_KEY);
     const endpoint = isPerplexity
@@ -150,6 +154,7 @@ export const generatePipelineImage = async ({
     caption,
     brandLogoText = 'Rahul Saini',
     customTemplate,
+    brand,
     userId = 'system',
     workspaceId = null,
 }) => {
@@ -158,7 +163,9 @@ export const generatePipelineImage = async ({
         return null;
     }
 
-    const prompt = buildPipelineImagePrompt({ titleHook, contentPillar, captionOutline, caption, brandLogoText, customTemplate });
+    const contentPrompt = buildPipelineImagePrompt({ titleHook, contentPillar, captionOutline, caption, brandLogoText, customTemplate });
+    const context = imageBrandContext(brand);
+    const prompt = context ? `${context}\n\n${contentPrompt}` : contentPrompt;
 
     try {
         const { buffer, contentType } = await generateImage({
@@ -310,6 +317,11 @@ export const runPipeline = async (pipelineId, workspaceId) => {
             ? pipeline.approver_phones : await getDefaultApprovers(pipeline.workspace_id);
         if (pipeline.auto_publish) autoReservation = await reserveUsage(pipeline.user_id, pipeline.workspace_id, 'trial_auto_posts');
         generationReservation = await reserveUsage(pipeline.user_id, pipeline.workspace_id);
+        const { data: brandProfile, error: brandError } = await db.from('workspace_brand_profiles')
+            .select('client_name,tone_of_voice,primary_color,secondary_color')
+            .eq('workspace_id', pipeline.workspace_id).maybeSingle();
+        if (brandError) throw brandError;
+        const brand = resolvePipelineBrand(brandProfile, pipeline.brand_logo_text);
         // 3. Generate AI Caption
         console.log('[PipelineExecutor] Generating AI caption...');
         const { caption, hashtags } = await generatePipelineCaption({
@@ -319,6 +331,7 @@ export const runPipeline = async (pipelineId, workspaceId) => {
             format: item.format,
             cta: item.cta,
             customTemplate: pipeline.caption_prompt_template,
+            brand,
         });
 
         generated = true;
@@ -331,8 +344,9 @@ export const runPipeline = async (pipelineId, workspaceId) => {
             contentPillar: item.content_pillar,
             captionOutline: item.caption_outline,
             caption: fullText,
-            brandLogoText: pipeline.brand_logo_text,
+            brandLogoText: brand.wordmark,
             customTemplate: pipeline.image_prompt_template,
+            brand,
             userId: pipeline.user_id,
             workspaceId: pipeline.workspace_id,
         });

@@ -6,7 +6,7 @@ import { useWorkspace } from '@/features/workspace';
 import API_BASE_URL from '@/shared/config';
 import { supabase } from '@/shared/lib/supabase';
 
-const DEFAULT_CAPTION_PROMPT = `You write engaging social media captions for a tech and AI automation brand.
+const DEFAULT_CAPTION_PROMPT = `You write engaging social media captions for the client brand.
 Return ONLY a JSON object with two keys: "caption" (80-150 words, first-person, engaging hook, short readable paragraphs, ends with the CTA) and "hashtags" (5-8 relevant hashtags as one space-separated string).
 
 Post Title: {{titleHook}}
@@ -15,7 +15,7 @@ Caption Outline: {{captionOutline}}
 Format: {{format}}
 CTA: {{cta}}`;
 
-const DEFAULT_IMAGE_PROMPT = `Professional, modern, minimal flat-design illustration for a social media post about: "{{titleHook}}". Theme: {{contentPillar}}. Style: clean tech/SaaS branding, dark navy and electric-blue accent palette, high contrast, 1:1 square composition. Include the text "{{brandLogoText}}" as a small logo-style wordmark in a corner, and work the phrase "{{titleHook}}" into the design as a short, bold headline overlay — clean sans-serif font, legible at thumbnail size.`;
+const DEFAULT_IMAGE_PROMPT = `Professional, clear illustration for a social media post about: "{{titleHook}}". Theme: {{contentPillar}}. Use the client brand colors and a balanced 1:1 square composition. Include "{{brandLogoText}}" as a small wordmark in a corner, and use a short, legible headline derived from "{{titleHook}}".`;
 
 export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave }) {
   const { activeWorkspaceId } = useWorkspace();
@@ -25,18 +25,21 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
     provider: 'linkedin',
     targetPlatforms: ['linkedin'],
     sheetUrl: '',
-    brandLogoText: 'Rahul Saini',
+    brandLogoText: '',
     captionPromptTemplate: DEFAULT_CAPTION_PROMPT,
     imagePromptTemplate: DEFAULT_IMAGE_PROMPT,
     autoPublish: true,
     approverPhones: '',
   });
   const [loading, setLoading] = useState(false);
+  const [workspaceBrand, setWorkspaceBrand] = useState(null);
+  const [brandError, setBrandError] = useState('');
 
   const [connectedProfiles, setConnectedProfiles] = useState([]);
   const [profilesLoading, setProfilesLoading] = useState(false);
 
   useEffect(() => {
+    const timer = setTimeout(() => {
     if (pipeline) {
       setFormData({
         name: pipeline.name || '',
@@ -45,7 +48,7 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
         targetPlatforms: pipeline.target_platforms || ['linkedin'],
         pageId: pipeline.page_id || '',
         sheetUrl: pipeline.sheet_url || '',
-        brandLogoText: pipeline.brand_logo_text || 'Rahul Saini',
+        brandLogoText: pipeline.brand_logo_text === 'Rahul Saini' ? '' : pipeline.brand_logo_text || '',
         captionPromptTemplate: pipeline.caption_prompt_template || DEFAULT_CAPTION_PROMPT,
         imagePromptTemplate: pipeline.image_prompt_template || DEFAULT_IMAGE_PROMPT,
         autoPublish: pipeline.auto_publish ?? true,
@@ -59,7 +62,7 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
         targetPlatforms: ['linkedin'],
         pageId: '',
         sheetUrl: '',
-        brandLogoText: 'Rahul Saini',
+        brandLogoText: '',
         captionPromptTemplate: DEFAULT_CAPTION_PROMPT,
         imagePromptTemplate: DEFAULT_IMAGE_PROMPT,
         autoPublish: true,
@@ -69,6 +72,11 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
 
     if (isOpen && activeWorkspaceId) {
       setProfilesLoading(true);
+      setWorkspaceBrand(null);
+      setBrandError('');
+    }
+    }, 0);
+    if (isOpen && activeWorkspaceId) {
       supabase.auth.getSession().then(({ data: { session } }) => {
         const token = session?.access_token;
         const headers = {
@@ -81,8 +89,14 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
         return Promise.all([
           fetch(`${API_BASE_URL}/api/meta/connection`, { headers }).then((r) => r.json()).catch(() => ({})),
           fetch(`${API_BASE_URL}/api/linkedin/connection`, { headers }).then((r) => r.json()).catch(() => ({})),
+          fetch(`${API_BASE_URL}/api/brand`, { headers }).then(async (r) => {
+            if (!r.ok) throw new Error('Could not load Portal identity');
+            return r.json();
+          }).catch((error) => ({ error: error.message })),
         ]);
-      }).then(([metaData, liData]) => {
+      }).then(([metaData, liData, brandData]) => {
+        setWorkspaceBrand(brandData?.brand || null);
+        setBrandError(brandData?.error || '');
         const list = [];
 
         // Meta Pages & Instagram
@@ -129,6 +143,7 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
         setProfilesLoading(false);
       });
     }
+    return () => clearTimeout(timer);
   }, [pipeline, isOpen, activeWorkspaceId]);
 
   if (!isOpen) return null;
@@ -286,15 +301,20 @@ export default function PipelineEditorModal({ isOpen, onClose, pipeline, onSave 
             </label>
             <input
               type="text"
-              placeholder="Rahul Saini"
+              placeholder={workspaceBrand?.client_name || 'Use Portal identity client name'}
               value={formData.brandLogoText}
               onChange={(e) => setFormData({ ...formData, brandLogoText: e.target.value })}
               className="w-full px-4 py-2.5 bg-[var(--bg)] border border-[var(--border)] rounded-2xl text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition"
             />
+            <p className="text-[11px] text-[var(--muted)] mt-1">Leave blank to use the Portal identity client name. A custom value overrides it.</p>
           </div>
 
           {/* AI Prompt Customization Section */}
           <div className="space-y-4 pt-3 border-t border-[var(--border)]">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4 text-xs">
+              <p className="font-semibold text-[var(--text)]">Portal identity used for future posts</p>
+              {brandError ? <p className="mt-2 text-amber-600">{brandError}</p> : workspaceBrand ? <p className="mt-2 text-[var(--muted)]">{workspaceBrand.client_name || 'Unnamed client'} · Tone: {workspaceBrand.tone_of_voice || 'No tone set'} · Colors: {workspaceBrand.primary_color} / {workspaceBrand.secondary_color}</p> : <p className="mt-2 text-[var(--muted)]">No brand profile saved for this workspace yet.</p>}
+            </div>
             <div className="flex items-center justify-between">
               <span className="text-xs font-mono uppercase tracking-widest text-[var(--accent)] font-bold flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5" /> AI Generation Prompts (Customizable)
