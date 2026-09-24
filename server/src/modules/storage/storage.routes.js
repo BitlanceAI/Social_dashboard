@@ -1,9 +1,10 @@
 import express from 'express';
 import { protect } from '../../middleware/auth.js';
+import { resolveWorkspace } from '../../middleware/workspace.js';
 import { postMediaUpload } from '../../shared/storage/postMedia.js';
 import {
     getConfig, getMe, createOrder, verifyPayment,
-    listMedia, uploadMedia, deleteMedia,
+    listMedia, uploadMedia, deleteMedia, quickSchedule,
 } from './storage.controller.js';
 
 const router = express.Router();
@@ -20,4 +21,8 @@ router.get('/media', listMedia);
 router.post('/media', postMediaUpload.array('files', 10), uploadMedia);
 router.delete('/media/:id', deleteMedia);
 
+// Quick-schedule a library file as a post (requires workspace context)
+router.post('/quick-schedule', resolveWorkspace, quickSchedule);
+
 export default router;
+

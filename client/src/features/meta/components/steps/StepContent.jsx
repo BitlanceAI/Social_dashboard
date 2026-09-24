@@ -59,6 +59,7 @@ const StepContent = ({
                                 platforms={platforms}
                                 hasContent={Boolean(content?.trim())}
                                 onCaption={onContentChange}
+                                imageUrl={mediaUrls?.[0] || undefined}
                             />
                         </div>
                         <textarea
@@ -182,6 +183,7 @@ const StepContent = ({
                                 )}
                             </div>
                         )}
+
 
                         {/* Engagement Bar */}
                         <div className="p-4 bg-[var(--surface)] flex gap-6 text-[var(--muted)] text-xs font-bold border-t border-[var(--border)]">

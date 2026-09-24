@@ -245,7 +245,30 @@ export const listMedia = async (userId, workspaceId = null) => {
 
     const { data, error } = await query;
     if (error) throw error;
-    return data || [];
+    
+    let scheduledQuery = supabaseAdmin
+        .from('scheduled_posts')
+        .select('media_urls')
+        .eq('user_id', userId)
+        .in('status', ['pending', 'pending_approval', 'approved', 'scheduled', 'publishing', 'published']);
+    scheduledQuery = workspaceId ? scheduledQuery.eq('workspace_id', workspaceId) : scheduledQuery.is('workspace_id', null);
+
+    const { data: scheduledPosts, error: scheduledError } = await scheduledQuery;
+    if (scheduledError) throw scheduledError;
+
+    const scheduledUrls = new Set();
+    if (scheduledPosts) {
+        scheduledPosts.forEach(post => {
+            if (Array.isArray(post.media_urls)) {
+                post.media_urls.forEach(url => scheduledUrls.add(url));
+            }
+        });
+    }
+
+    return (data || []).map(item => ({
+        ...item,
+        is_scheduled: scheduledUrls.has(item.url),
+    }));
 };
 
 /**
