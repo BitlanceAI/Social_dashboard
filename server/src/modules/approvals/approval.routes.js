@@ -26,6 +26,7 @@ import {
     requestApproval,
     activateApprovedPost,
     rejectPendingPost,
+    advanceRepostQueue,
 } from './approval.service.js';
 
 import { loadApprovalQueue, parseQueuePage } from './approval.store.js';
@@ -131,6 +132,8 @@ router.post('/:id/approve', async (req, res) => {
             await sendTextMessage(phone, '✅ The scheduled post was approved from the dashboard — no action needed.').catch(() => {});
         }
 
+        await advanceRepostQueue(updated);
+
         res.json({
             success: true,
             post: updated,
@@ -156,6 +159,8 @@ router.post('/:id/reject', async (req, res) => {
         for (const phone of rowApproverPhones(post)) {
             await sendTextMessage(phone, '❌ The scheduled post was rejected from the dashboard — no action needed.').catch(() => {});
         }
+
+        await advanceRepostQueue(updated);
 
         res.json({ success: true, post: updated, message: 'Post rejected.' });
     } catch (err) {

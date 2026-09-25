@@ -21,7 +21,7 @@
 import '../../config/env.js';
 
 import { supabaseAdmin } from '../../config/supabase.js';
-import { settlePendingPost } from './approval.store.js';
+import { settlePendingPost, settleRepostDeliveries } from './approval.store.js';
 import { sendToWorkspace } from '../push/push.service.js';
 import {
     isWhatsAppEnabled,
@@ -180,6 +180,19 @@ export const rejectPendingPost = (post, { by = 'dashboard', awaitFeedback = fals
         rejection_comment: String(reason).trim() || null,
     });
 
+/** A settled repost approval frees its watch's slot for the next source post. */
+export const advanceRepostQueue = async (post) => {
+    if (!post?.repost_source_post_id) return;
+    try {
+        await settleRepostDeliveries(db(), post, activateApprovedPost, rejectPendingPost);
+        const { advanceRepostApprovalForDelivery } = await import('../reposts/repost.service.js');
+        await advanceRepostApprovalForDelivery(post);
+    } catch (error) {
+        // The five-minute watch sweep will retry a missed top-up.
+        console.error(`[Approvals] Could not advance repost queue after ${post.id}:`, error.message);
+    }
+};
+
 const notifyOthers = async (post, fromDigits, text) => {
     for (const phone of rowApproverPhones(post).filter((p) => p !== fromDigits)) {
         await sendTextMessage(phone, text).catch(() => {});
@@ -227,6 +240,7 @@ export const decideFromWhatsApp = async (postId, fromDigits, approved) => {
             body: `${post.page_name || 'Post'}: approved by +${fromDigits}.`,
             url: '/socialdashboad',
         }).catch(() => {});
+        await advanceRepostQueue(updated);
         return;
     }
 
@@ -251,6 +265,7 @@ export const decideFromWhatsApp = async (postId, fromDigits, approved) => {
         body: `${post.page_name || 'Post'}: rejected by +${fromDigits}.`,
         url: '/socialdashboad',
     }).catch(() => {});
+    await advanceRepostQueue(updated);
 };
 
 // WhatsApp message ids contain '.', '=' and '+', which PostgREST's `or=()`

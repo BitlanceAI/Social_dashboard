@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { SourceTextModule, SyntheticModule } from 'node:vm';
-import { loadApprovalQueue, parseQueuePage, settlePendingPost } from './approval.store.js';
+import { loadApprovalQueue, parseQueuePage, settlePendingPost, settleRepostDeliveries } from './approval.store.js';
 
 // In-memory PostgREST double: updates evaluate their predicates at commit time.
 function database(rows) {
@@ -46,7 +46,7 @@ async function service(db) {
     const mocks = {
         '../../config/env.js': {},
         '../../config/supabase.js': { supabaseAdmin: db },
-        './approval.store.js': { settlePendingPost },
+        './approval.store.js': { settlePendingPost, settleRepostDeliveries },
         '../push/push.service.js': { sendToWorkspace: async () => {} },
         '../whatsapp/whatsapp.service.js': {
             isWhatsAppEnabled: () => true, cleanPhones: phones => phones,
@@ -138,6 +138,24 @@ test('settling cannot update a different workspace or a settled post', async () 
     await api.activateApprovedPost(post);
     assert.equal(await api.rejectPendingPost(post, { reason: 'Late rejection' }), null);
     assert.equal(post.rejection_comment, undefined);
+});
+
+test('one repost decision settles all destinations in its workspace and leaves the next source waiting', async () => {
+    const rows = [
+        { id: 'a', workspace_id: 'w', repost_source_post_id: 'source-1', status: 'pending_approval' },
+        { id: 'b', workspace_id: 'w', repost_source_post_id: 'source-1', status: 'pending_approval' },
+        { id: 'next', workspace_id: 'w', repost_source_post_id: 'source-2', status: 'pending_approval' },
+        { id: 'foreign', workspace_id: 'other', repost_source_post_id: 'source-1', status: 'pending_approval' },
+    ];
+    const db = database(rows);
+    const api = await service(db);
+    const first = await api.activateApprovedPost({ ...rows[0] }, { by: 'whatsapp' });
+    await settleRepostDeliveries(db, first, api.activateApprovedPost, api.rejectPendingPost);
+    assert.equal(rows[0].status, 'pending');
+    assert.equal(rows[1].status, 'pending');
+    assert.equal(rows[1].approved_by, 'whatsapp');
+    assert.equal(rows[2].status, 'pending_approval');
+    assert.equal(rows[3].status, 'pending_approval');
 });
 
 test('failed WhatsApp send keeps the post in the pending queue', async () => {

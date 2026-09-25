@@ -195,6 +195,17 @@ export function mediaSupported(post, platforms) {
     return true;
 }
 
+async function sendRepostApproval(delivery) {
+    const attemptedAt = new Date().toISOString();
+    const result = await requestApproval(delivery).catch(error => ({ sent: false, error: error.message }));
+    const { error } = await db().from('scheduled_posts').update({
+        repost_approval_attempted_at: attemptedAt,
+        error_message: result.sent ? null : `WhatsApp approval could not be sent: ${result.error || 'unknown error'}`,
+    }).eq('id', delivery.id);
+    if (error) throw error;
+    return result;
+}
+
 export async function queuePost(workspaceId, postId, { forceApproval = false, scheduledTime = null } = {}) {
     const post = await one(db().from('instagram_repost_posts').select('*').eq('id', postId).eq('workspace_id', workspaceId));
     if (!post) throw fail('Imported post not found', 404);
@@ -236,11 +247,72 @@ export async function queuePost(workspaceId, postId, { forceApproval = false, sc
         if (error) throw error;
         deliveries.push(delivery);
         created++;
-        if (approval) await requestApproval(delivery).catch(e => ({ sent: false, error: e.message }));
+    }
+    if (approval) {
+        const pending = await rows(db().from('scheduled_posts').select('*')
+            .eq('repost_source_post_id', post.id).eq('status', 'pending_approval')
+            .order('created_at', { ascending: true }).order('id', { ascending: true }));
+        if (pending.length && !pending[0].approval_sent_at && !pending[0].repost_approval_attempted_at) {
+            await sendRepostApproval(pending[0]);
+        }
     }
     if (deliveries.length) await db().from('instagram_repost_posts').update({ state: 'queued',
         error_message: null, updated_at: new Date().toISOString() }).eq('id', post.id);
     return { skipped: created === 0, deliveries };
+}
+
+/** Keep one source post under review. Called after a scrape or a settled decision. */
+export async function pumpRepostApprovalQueue(watch) {
+    if (!watch?.active || watch.mode !== 'approval') return { skipped: true };
+    const ownerId = await billingOwner(watch.user_id, watch.workspace_id);
+    if (!subscriptionAccess(await ensureSubscription(ownerId)).active) return { skipped: true, reason: 'Subscription inactive' };
+    const { data: claimed, error: claimError } = await db().rpc('claim_instagram_repost_approval_watch', { p_watch_id: watch.id });
+    if (claimError) throw claimError;
+    if (!claimed) return { skipped: true };
+    const heartbeat = setInterval(async () => {
+        try {
+            const { error } = await db().from('instagram_repost_watches')
+                .update({ approval_claimed_until: new Date(Date.now() + 15 * 60000).toISOString() })
+                .eq('id', watch.id);
+            if (error) throw error;
+        } catch (error) {
+            console.error(`[Reposts] Approval claim heartbeat failed for ${watch.id}:`, error.message);
+        }
+    }, 60000);
+    heartbeat.unref?.();
+    try {
+        const pending = await rows(db().rpc('pending_instagram_repost_approvals', { p_watch_id: watch.id }));
+        if (pending.length) {
+            const delivery = pending[0];
+            const lastAttempt = delivery.repost_approval_attempted_at && new Date(delivery.repost_approval_attempted_at).getTime();
+            if (!delivery.approval_sent_at && (!lastAttempt || Date.now() - lastAttempt >= 5 * 60000)) {
+                await sendRepostApproval(delivery);
+            }
+            return { awaiting: pending.length };
+        }
+        const { data: postId, error: nextError } = await db().rpc('next_instagram_repost_approval_candidate', { p_watch_id: watch.id });
+        if (nextError) throw nextError;
+        if (!postId) return { empty: true };
+        const { data: lastScheduled, error: lastError } = await db().rpc('last_instagram_repost_delivery_time', { p_watch_id: watch.id });
+        if (lastError) throw lastError;
+        const anchor = lastScheduled ? new Date(lastScheduled).getTime() : 0;
+        const when = new Date(Math.max(Date.now(), anchor + watch.gap_minutes * 60000)).toISOString();
+        return await queuePost(watch.workspace_id, postId, { scheduledTime: when });
+    } finally {
+        clearInterval(heartbeat);
+        const { error } = await db().from('instagram_repost_watches')
+            .update({ approval_claimed_until: null }).eq('id', watch.id);
+        if (error) console.error(`[Reposts] Could not release approval claim for ${watch.id}:`, error.message);
+    }
+}
+
+export async function advanceRepostApprovalForDelivery(delivery) {
+    if (!delivery?.repost_source_post_id) return;
+    const source = await one(db().from('instagram_repost_posts').select('watch_id')
+        .eq('id', delivery.repost_source_post_id).eq('workspace_id', delivery.workspace_id));
+    if (!source) return;
+    const watch = await getWatch(delivery.workspace_id, source.watch_id);
+    await pumpRepostApprovalQueue(watch);
 }
 
 export async function runWatch(watch, { force = false } = {}) {
@@ -281,7 +353,7 @@ export async function runWatch(watch, { force = false } = {}) {
             post = data;
             if (post.state !== 'imported') continue;
             imported++;
-            if (!baseline && watch.mode !== 'review') {
+            if (!baseline && watch.mode === 'automatic') {
                 try {
                     const when = new Date(Date.now() + (imported - 1) * watch.gap_minutes * 60000).toISOString();
                     await queuePost(watch.workspace_id, post.id, { scheduledTime: when });
@@ -303,6 +375,7 @@ export async function runWatch(watch, { force = false } = {}) {
             last_run_new_posts: imported, run_claimed_until: null,
             ...(newest && !failed ? { last_seen_posted_at: new Date(newest).toISOString(), last_seen_shortcode: newestCode } : {}) };
         await db().from('instagram_repost_watches').update(update).eq('id', watch.id);
+        if (watch.mode === 'approval') await pumpRepostApprovalQueue(watch);
         return { baseline, scraped: found.length, imported, failed };
     } catch (err) {
         await db().from('instagram_repost_watches').update({
@@ -319,6 +392,10 @@ export async function runDueWatches() {
         for (const watch of watches) {
             try { await runWatch(watch); }
             catch (err) { console.error(`[Reposts] @${watch.source_handle}:`, err.message); }
+            if (watch.mode === 'approval') {
+                try { await pumpRepostApprovalQueue(watch); }
+                catch (err) { console.error(`[Reposts] Approval queue @${watch.source_handle}:`, err.message); }
+            }
         }
         if (watches.length < 50) break;
     }

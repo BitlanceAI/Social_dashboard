@@ -2,7 +2,7 @@ import express from 'express';
 import { authenticateUser } from '../../middleware/auth.js';
 import { resolveWorkspace, requireWorkspaceCapability } from '../../middleware/workspace.js';
 import { supabaseAdmin } from '../../config/supabase.js';
-import { getWatch, listWatches, listPosts, saveWatch, runWatch, queuePost, retryMedia } from './repost.service.js';
+import { getWatch, listWatches, listPosts, saveWatch, runWatch, queuePost, retryMedia, pumpRepostApprovalQueue } from './repost.service.js';
 
 const router = express.Router();
 router.use(authenticateUser, resolveWorkspace);
@@ -17,12 +17,33 @@ router.get('/watches', view, async (req, res) => {
     catch (error) { respond(res, error); }
 });
 router.post('/watches', edit, async (req, res) => {
-    try { res.status(201).json({ watch: await saveWatch(req.workspaceId, req.user.id, req.body || {}) }); }
+    try {
+        const watch = await saveWatch(req.workspaceId, req.user.id, req.body || {});
+        if (watch.mode === 'approval') await pumpRepostApprovalQueue(watch);
+        res.status(201).json({ watch });
+    }
     catch (error) { respond(res, error); }
 });
 router.put('/watches/:id', edit, async (req, res) => {
-    try { res.json({ watch: await saveWatch(req.workspaceId, req.user.id, req.body || {}, req.params.id) }); }
+    try {
+        const watch = await saveWatch(req.workspaceId, req.user.id, req.body || {}, req.params.id);
+        if (watch.mode === 'approval') await pumpRepostApprovalQueue(watch);
+        res.json({ watch });
+    }
     catch (error) { respond(res, error); }
+});
+router.delete('/watches/:id', edit, async (req, res) => {
+    try {
+        const { data: deleted, error } = await supabaseAdmin.rpc('delete_instagram_repost_watch', {
+            p_watch_id: req.params.id, p_workspace_id: req.workspaceId,
+        });
+        if (error) throw error;
+        if (!deleted) return res.status(404).json({ error: 'Watch not found' });
+        res.json({ deleted: true });
+    } catch (error) {
+        if (error.code === 'P0001') error.status = 409;
+        respond(res, error);
+    }
 });
 router.patch('/watches/:id/active', edit, async (req, res) => {
     try {
@@ -32,6 +53,7 @@ router.patch('/watches/:id/active', edit, async (req, res) => {
             .update({ active: req.body.active, updated_at: new Date().toISOString() })
             .eq('id', req.params.id).eq('workspace_id', req.workspaceId).select('*').single();
         if (error) throw error;
+        if (data.active && data.mode === 'approval') await pumpRepostApprovalQueue(data);
         res.json({ watch: data });
     } catch (error) { respond(res, error); }
 });
@@ -66,7 +88,12 @@ router.post('/posts/:id/queue', publish, async (req, res) => {
 router.post('/posts/:id/retry', publish, async (req, res) => {
     try {
         const post = await importedPost(req.workspaceId, req.params.id);
-        if (post.state === 'media_failed') return res.json({ post: await retryMedia(req.workspaceId, post.id) });
+        if (post.state === 'media_failed') {
+            const repaired = await retryMedia(req.workspaceId, post.id);
+            const watch = await getWatch(req.workspaceId, post.watch_id);
+            if (watch.mode === 'approval') await pumpRepostApprovalQueue(watch);
+            return res.json({ post: repaired });
+        }
         const deliveries = await postDeliveries(req.workspaceId, post.id);
         const failed = deliveries.filter(d => d.status === 'failed');
         if (failed.length) {
@@ -88,6 +115,8 @@ router.post('/posts/:id/skip', edit, async (req, res) => {
             .update({ state: 'skipped', updated_at: new Date().toISOString() })
             .eq('id', post.id).eq('workspace_id', req.workspaceId).select('*').single();
         if (error) throw error;
+        const watch = await getWatch(req.workspaceId, post.watch_id);
+        if (watch.mode === 'approval') await pumpRepostApprovalQueue(watch);
         res.json({ post: data });
     } catch (error) { respond(res, error); }
 });
@@ -103,6 +132,8 @@ router.post('/posts/:id/cancel', publish, async (req, res) => {
             .eq('workspace_id', req.workspaceId).eq('repost_source_post_id', post.id)
             .in('status', ['pending', 'pending_approval', 'failed']).select('id,status');
         if (error) throw error;
+        const watch = await getWatch(req.workspaceId, post.watch_id);
+        if (watch.mode === 'approval') await pumpRepostApprovalQueue(watch);
         res.json({ deliveries: data || [] });
     } catch (error) { respond(res, error); }
 });

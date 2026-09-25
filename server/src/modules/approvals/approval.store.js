@@ -40,3 +40,19 @@ export const settlePendingPost = async (db, post, patch) => {
     if (error) throw error;
     return data;
 };
+
+/** Apply one source-post decision to every destination that is still awaiting approval. */
+export const settleRepostDeliveries = async (db, post, approve, reject) => {
+    if (!post?.repost_source_post_id) return;
+    const { data, error } = await db.from('scheduled_posts').select('*')
+        .eq('repost_source_post_id', post.repost_source_post_id)
+        .eq('workspace_id', post.workspace_id).eq('status', 'pending_approval');
+    if (error) throw error;
+    for (const sibling of data || []) {
+        if (sibling.id === post.id) continue;
+        if (post.status === 'pending') await approve(sibling, { by: post.approved_by || 'repost approval' });
+        if (post.status === 'cancelled') await reject(sibling, {
+            by: post.rejected_by || 'repost approval', reason: post.rejection_comment || '',
+        });
+    }
+};

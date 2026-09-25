@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowRight, CirclePause, CirclePlay, Clock3, RefreshCw, Repeat2, ShieldCheck } from 'lucide-react';
+import { ArrowRight, CirclePause, CirclePlay, Clock3, RefreshCw, Repeat2, ShieldCheck, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { repostApi } from '../lib/repostApi';
 
@@ -70,6 +70,18 @@ export default function InstagramRepostPanel({ workspaceId, targets }) {
         setForm({ ...form, targets: selected ? form.targets.filter(t => t.pageId !== page.id)
             : [...form.targets, { pageId: page.id, platforms: page.platforms.includes('instagram') ? ['instagram'] : ['facebook'] }] });
     };
+    const deleteWatch = async () => {
+        if (!selected || !window.confirm(`Delete @${selected.source_handle} watch? Pending reposts will be cancelled. Published post history will remain.`)) return;
+        setBusy('delete');
+        try {
+            await repostApi(workspaceId, `/watches/${selected.id}`, { method: 'DELETE' });
+            if (editingId === selected.id) setEditingId(null);
+            setPosts([]);
+            await load();
+            toast.success('Watch deleted');
+        } catch (error) { toast.error(error.message); }
+        finally { setBusy(''); }
+    };
 
     return <div className="space-y-7 text-[var(--text)]">
         <header className="flex flex-col gap-3 border-b border-[var(--border)] pb-6 sm:flex-row sm:items-end sm:justify-between">
@@ -81,7 +93,7 @@ export default function InstagramRepostPanel({ workspaceId, targets }) {
 
         <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
             <h2 className="text-lg font-semibold">{editingId ? 'Edit watch' : 'Watch a source'}</h2>
-            <p className="mb-5 mt-1 text-sm text-[var(--muted)]">Your first check imports existing posts for review. Newer posts follow the mode you choose.</p>
+            <p className="mb-5 mt-1 text-sm text-[var(--muted)]">Approval mode sends the first imported post to WhatsApp automatically. Each decision sends the next post for approval.</p>
             <form onSubmit={create} className="grid gap-4 sm:grid-cols-2">
                 <label className="text-sm">Public Instagram handle<input className={`${field} mt-1`} placeholder="@sourceaccount" value={form.sourceHandle} required readOnly={!!editingId}
                     onChange={e => setForm({ ...form, sourceHandle: e.target.value })} /></label>
@@ -111,7 +123,7 @@ export default function InstagramRepostPanel({ workspaceId, targets }) {
         </section>
 
         {watches.length > 0 && <section className="grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
-            <div className="space-y-2">{watches.map(w => <button key={w.id} onClick={() => setSelectedId(w.id)} className={`w-full rounded-xl border px-4 py-3 text-left ${selectedId === w.id ? 'border-[var(--accent)] bg-[var(--accent-muted)]' : 'border-[var(--border)] bg-[var(--surface)]'}`}>
+            <div className="space-y-2">{watches.map(w => <button key={w.id} onClick={() => { setPosts([]); setSelectedId(w.id); }} className={`w-full rounded-xl border px-4 py-3 text-left ${selectedId === w.id ? 'border-[var(--accent)] bg-[var(--accent-muted)]' : 'border-[var(--border)] bg-[var(--surface)]'}`}>
                 <span className="block font-semibold">@{w.source_handle}</span><span className="text-xs text-[var(--muted)]">{w.active ? 'Active' : 'Paused'} · {w.mode}</span></button>)}</div>
             <div className="min-w-0 space-y-4">
                 {selected && <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
@@ -123,7 +135,8 @@ export default function InstagramRepostPanel({ workspaceId, targets }) {
                                 checksPerDay: selected.checks_per_day, scrapeLimit: selected.scrape_limit, gapMinutes: selected.gap_minutes });
                                 window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Edit</button>
                             <button disabled={!!busy} className={`${button} border border-[var(--border)]`} onClick={async () => { setBusy('pause'); try { await repostApi(workspaceId, `/watches/${selected.id}/active`, { method: 'PATCH', body: { active: !selected.active } }); await refresh(); } catch (e) { toast.error(e.message); } finally { setBusy(''); } }}>
-                                {selected.active ? <CirclePause size={14} className="mr-1 inline" /> : <CirclePlay size={14} className="mr-1 inline" />}{selected.active ? 'Pause' : 'Resume'}</button></div></div>
+                                {selected.active ? <CirclePause size={14} className="mr-1 inline" /> : <CirclePlay size={14} className="mr-1 inline" />}{selected.active ? 'Pause' : 'Resume'}</button>
+                            <button disabled={!!busy} className={`${button} border border-red-500/30 text-red-600 hover:bg-red-500/10`} onClick={deleteWatch}><Trash2 size={14} className="mr-1 inline" /> Delete</button></div></div>
                     {selected.last_run_error && <p className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-600">{selected.last_run_error}</p>}
                 </div>}
                 {posts.length === 0 ? <div className="rounded-2xl border border-dashed border-[var(--border)] p-10 text-center text-sm text-[var(--muted)]">No imported posts yet. Run the first check to build your review list.</div>
@@ -135,7 +148,7 @@ export default function InstagramRepostPanel({ workspaceId, targets }) {
                             {(p.error_message || p.deliveries?.some(d => d.error_message)) && <p className="mt-1 text-xs text-red-600">{p.error_message || p.deliveries.find(d => d.error_message)?.error_message}</p>}
                             {p.deliveries?.length > 0 && <p className="mt-1 text-xs text-[var(--muted)]">{p.deliveries.map(d => `${d.page_name}: ${d.status}`).join(' · ')}</p>}
                             <div className="mt-3 flex flex-wrap gap-2">
-                                {['imported', 'queued'].includes(p.state) && (p.deliveries?.length || 0) < (selected?.targets?.length || 0) && <button disabled={!!busy} className={`${button} bg-[var(--accent)] text-white`} onClick={() => act(p.id, `/posts/${p.id}/queue`)}>{p.deliveries?.length ? 'Complete queue' : 'Queue post'}</button>}
+                                {selected?.mode !== 'approval' && ['imported', 'queued'].includes(p.state) && (p.deliveries?.length || 0) < (selected?.targets?.length || 0) && <button disabled={!!busy} className={`${button} bg-[var(--accent)] text-white`} onClick={() => act(p.id, `/posts/${p.id}/queue`)}>{p.deliveries?.length ? 'Complete queue' : 'Queue post'}</button>}
                                 {p.state === 'imported' && !p.deliveries?.length && <button disabled={!!busy} className={`${button} border border-[var(--border)]`} onClick={() => act(p.id, `/posts/${p.id}/skip`)}>Skip</button>}
                                 {(p.state === 'media_failed' || p.deliveries?.some(d => d.status === 'failed')) && <button disabled={!!busy} className={`${button} border border-[var(--border)]`} onClick={() => act(p.id, `/posts/${p.id}/retry`)}>Retry</button>}
                                 {p.deliveries?.some(d => ['pending', 'pending_approval'].includes(d.status)) && <button disabled={!!busy} className={`${button} border border-[var(--border)]`} onClick={() => act(p.id, `/posts/${p.id}/cancel`)}>Cancel</button>}
