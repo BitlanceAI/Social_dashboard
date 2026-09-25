@@ -31,6 +31,7 @@ import pipelineRoutes from './modules/pipelines/pipeline.routes.js';
 import contentRoutes from './modules/content/content.routes.js';
 import brandRoutes from './modules/brand/brand.routes.js';
 import reportRoutes from './modules/reports/reports.routes.js';
+import repostRoutes from './modules/reposts/repost.routes.js';
 import briefRoutes from './modules/agency/briefs.routes.js';
 import { catalogRouter } from './modules/agency/catalog.routes.js';
 
@@ -75,6 +76,7 @@ app.use('/api/pipelines', pipelineRoutes); // AI content pipelines & auto-poster
 app.use('/api/content', contentRoutes); // agency content calendar, versions and client review
 app.use('/api/brand', brandRoutes); // workspace client identity and brand rules
 app.use('/api/reports', reportRoutes); // client-safe delivery reporting
+app.use('/api/reposts', repostRoutes); // Instagram source watches and imported posts
 app.use('/api/briefs', briefRoutes);
 app.use('/api/campaigns', catalogRouter('campaigns'));
 app.use('/api/pillars', catalogRouter('content_pillars'));

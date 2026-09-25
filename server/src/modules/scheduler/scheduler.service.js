@@ -24,8 +24,10 @@ import { sweepExpiredStorage } from '../storage/storage.service.js';
 import { sweepExpiredDesigns } from '../design/design.service.js';
 import { sendApprovalReminders } from '../approvals/approval.service.js';
 import { runPipeline } from '../pipelines/pipeline_executor.service.js';
+import { runDueWatches } from '../reposts/repost.service.js';
 
 let supabase;
+let repostSweepRunning = false;
 
 const CHECK_INTERVAL = 60 * 1000; // 1 minute
 
@@ -141,6 +143,14 @@ export const startPostScheduler = () => {
 
         await checkAndPublishPosts();
         await checkAndRunPipelines();
+
+        // Scrapes may take minutes. Keep the publishing tick responsive while
+        // the database lease prevents duplicate work across server instances.
+        if (tickCount % 5 === 0 && !repostSweepRunning) {
+            repostSweepRunning = true;
+            runDueWatches().catch(err => console.error('[Reposts] Sweep failed:', err.message))
+                .finally(() => { repostSweepRunning = false; });
+        }
 
         // Nudges approvers who have not tapped Approve/Reject yet (no-op
         // without WhatsApp credentials). Cheap: a single indexed query.

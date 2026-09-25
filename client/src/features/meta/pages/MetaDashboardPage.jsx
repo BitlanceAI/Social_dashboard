@@ -73,7 +73,8 @@ import BulkUploadModal from '@/features/meta/components/BulkUploadModal';
 // effect or auth-state handler re-fires it — kills the duplicate connect toast.
 const processedOAuthTokens = new Set();
 const PipelinesPage = lazy(() => import('@/features/pipelines/pages/PipelinesPage'));
-const dashboardTabs = new Set(['create', 'approvals', 'profiles', 'library', 'history', 'analytics']);
+const InstagramRepostPanel = lazy(() => import('@/features/meta/components/InstagramRepostPanel'));
+const dashboardTabs = new Set(['create', 'reposts', 'approvals', 'profiles', 'library', 'history', 'analytics']);
 
 const MetaDashboardView = ({ activeTab, setActiveTab }) => {
     const navigate = useNavigate();
@@ -1270,6 +1271,11 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                         {activeTab === 'pipelines' && (
                             <Suspense fallback={<p role="status">Loading AI Pipelines…</p>}>
                                 <PipelinesPage />
+                            </Suspense>
+                        )}
+                        {activeTab === 'reposts' && (
+                            <Suspense fallback={<p role="status">Loading Instagram Repost…</p>}>
+                                <InstagramRepostPanel workspaceId={activeWorkspaceId} targets={targets} />
                             </Suspense>
                         )}
                         {activeTab === 'approvals' && (
