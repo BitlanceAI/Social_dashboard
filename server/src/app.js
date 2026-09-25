@@ -15,6 +15,7 @@ import { env } from './config/env.js';
 import authRoutes from './modules/auth/auth.routes.js';
 import profileRoutes from './modules/profile/profile.routes.js';
 import metaRoutes from './modules/meta/meta.routes.js';
+import { messagingRouter, messagingWebhook } from './modules/messaging/messaging.routes.js';
 import linkedinRoutes from './modules/linkedin/linkedin.routes.js';
 import instagramRoutes from './modules/instagram/instagram.routes.js';
 import workspaceRoutes from './modules/workspace/workspace.routes.js';
@@ -54,6 +55,8 @@ app.use(express.json({
 // New modules mount here. Keep prefixed routes above any '/api' root mounts.
 app.use('/api/auth', authRoutes);
 app.use('/api/profiles', profileRoutes);
+app.use('/api/meta/webhook', messagingWebhook);
+app.use('/api/meta/inbox', messagingRouter);
 app.use('/api/meta', metaRoutes); // Facebook Pages + Instagram publishing
 app.use('/api/linkedin', linkedinRoutes); // LinkedIn member + (dormant) Page publishing
 app.use('/api/instagram', instagramRoutes);

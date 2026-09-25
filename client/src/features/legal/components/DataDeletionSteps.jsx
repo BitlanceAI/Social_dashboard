@@ -22,10 +22,11 @@ const DataDeletionSteps = () => (
                 <li>Your app-scoped Meta user ID</li>
                 <li>The list of Facebook Pages and linked Instagram Business accounts</li>
                 <li>The posts you have composed and scheduled</li>
+                <li>When messaging is enabled: business conversations, message text, participant IDs, attachment links, timestamps, and delivery/read status</li>
             </ul>
             <p className={`${BODY} mt-4`}>
-                We do not store your Facebook or Instagram password, your direct
-                messages, or your comments.
+                We do not store your Facebook or Instagram password. Disconnecting a Meta
+                account also removes its stored business conversations and messages from this workspace.
             </p>
         </div>
 

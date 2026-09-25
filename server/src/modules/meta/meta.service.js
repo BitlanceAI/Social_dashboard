@@ -324,6 +324,48 @@ class MetaService {
         return pageApi.request('DELETE', `/${commentId}`);
     }
 
+    // ==================== INSTAGRAM COMMENT MANAGEMENT ====================
+
+    async getInstagramComments(mediaId, pageAccessToken, limit = 50) {
+        const pageApi = new MetaService(pageAccessToken);
+        const result = await pageApi.request('GET', `/${mediaId}/comments`, {}, {
+            fields: 'id,text,timestamp,username,like_count,hidden',
+            limit,
+        });
+        if (!result.success) return result;
+
+        return {
+            success: true,
+            comments: (result.data.data || []).map((comment) => ({
+                id: comment.id,
+                message: comment.text || '',
+                createdAt: comment.timestamp,
+                authorName: comment.username ? `@${comment.username}` : 'Instagram user',
+                authorPicture: null,
+                likeCount: comment.like_count ?? 0,
+                replyCount: 0,
+                isHidden: Boolean(comment.hidden),
+                canHide: true,
+                canRemove: true,
+            })),
+        };
+    }
+
+    async replyToInstagramComment(commentId, message, pageAccessToken) {
+        const pageApi = new MetaService(pageAccessToken);
+        return pageApi.request('POST', `/${commentId}/replies`, { message });
+    }
+
+    async setInstagramCommentHidden(commentId, hidden, pageAccessToken) {
+        const pageApi = new MetaService(pageAccessToken);
+        return pageApi.request('POST', `/${commentId}`, { hide: Boolean(hidden) });
+    }
+
+    async deleteInstagramComment(commentId, pageAccessToken) {
+        const pageApi = new MetaService(pageAccessToken);
+        return pageApi.request('DELETE', `/${commentId}`);
+    }
+
     // ==================== FACEBOOK PAGE POST METHODS ====================
 
     /**
@@ -714,21 +756,23 @@ class MetaService {
      */
     static get DEFAULT_SCOPES() {
         // Only permissions this app can actually demonstrate in App Review.
-        // Requesting anything we cannot screencast gets that permission
-        // rejected, so messaging/comments scopes are deliberately absent
-        // until those features exist.
-        // pages_manage_engagement is deliberately absent until it is added to
-        // the app's Meta use case / App Review — requesting a scope the app
-        // cannot ask for fails the WHOLE consent dialog ("Invalid Scopes").
-        // Re-adding it re-enables comment reply/hide/delete; reading comments
-        // works without it (pages_read_engagement).
+        // Request only permissions backed by a visible product workflow that
+        // can be demonstrated during App Review. Comment reply/hide/delete is
+        // implemented in CommentsModal, so pages_manage_engagement belongs in
+        // the production permission set. Reading comments remains covered by
+        // pages_read_engagement.
         return [
             'pages_show_list',          // list Pages -> find linked IG account
             'pages_read_engagement',    // read Page fields + post comments
+            'pages_read_user_content',  // read user-generated Page posts and comments
+            'pages_manage_engagement',  // reply to, hide/unhide, delete Page comments
             'pages_manage_posts',       // publish to a Facebook Page
             'instagram_basic',          // read IG profile + media
             'instagram_content_publish', // publish to IG Business account
-            'business_management'       // read & manage Business Manager assets
+            'instagram_manage_comments', // read, reply to, hide, delete IG comments
+            'business_management',      // read & manage Business Manager assets
+            ...(process.env.META_MESSAGING_ENABLED === 'true'
+                ? ['pages_messaging', 'instagram_manage_messages', 'pages_manage_metadata'] : []),
         ];
     }
 

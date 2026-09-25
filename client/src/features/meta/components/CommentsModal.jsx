@@ -14,9 +14,8 @@ const timeAgo = (iso, now = Date.now()) => {
 };
 
 /**
- * Comment manager for one Facebook post: read the thread, reply as the
- * Page, hide/unhide, delete. Facebook only — moderating Instagram comments
- * needs instagram_manage_comments, which this app does not request.
+ * Comment manager for a Facebook Page post or Instagram Business media:
+ * read the thread, reply as the account, hide/unhide, and delete.
  */
 const CommentsModal = ({ post, authHeaders, onClose }) => {
     const [comments, setComments] = useState(null);
@@ -24,12 +23,14 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
     const [replyTo, setReplyTo] = useState(null);   // comment id
     const [replyText, setReplyText] = useState('');
     const [busy, setBusy] = useState({});           // comment id -> action in flight
+    const [permissionError, setPermissionError] = useState(null);
+    const platform = post.platform === 'instagram' ? 'instagram' : 'facebook';
 
     const load = useCallback(async () => {
         setLoading(true);
         try {
             const res = await fetch(
-                `${API_BASE_URL}/api/meta/posts/${post.id}/comments?pageId=${encodeURIComponent(post.pageId)}`,
+                `${API_BASE_URL}/api/meta/posts/${post.id}/comments?pageId=${encodeURIComponent(post.pageId)}&platform=${platform}`,
                 { headers: authHeaders() },
             );
             const data = await res.json();
@@ -42,7 +43,7 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
             setLoading(false);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [post.id, post.pageId]);
+    }, [post.id, post.pageId, platform]);
 
     useEffect(() => {
         const t = setTimeout(load, 0);
@@ -73,7 +74,10 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
             ...options,
         });
         const data = await res.json();
-        if (!res.ok || !data.success) throw new Error(data.error || 'The action failed');
+        if (!res.ok || !data.success) {
+            if (data.code === 'META_PERMISSION_REQUIRED') setPermissionError(data.error);
+            throw new Error(data.error || 'The action failed');
+        }
         return data;
     };
 
@@ -83,9 +87,9 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
         await call(`/api/meta/comments/${commentId}/reply`, {
             method: 'POST',
             headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pageId: post.pageId, message }),
+            body: JSON.stringify({ pageId: post.pageId, platform, message }),
         });
-        toast.success('Reply posted as your Page');
+        toast.success(platform === 'instagram' ? 'Reply posted on Instagram' : 'Reply posted as your Page');
         setReplyTo(null);
         setReplyText('');
         load();
@@ -95,7 +99,7 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
         await call(`/api/meta/comments/${comment.id}/hide`, {
             method: 'POST',
             headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pageId: post.pageId, hidden: !comment.isHidden }),
+            body: JSON.stringify({ pageId: post.pageId, platform, hidden: !comment.isHidden }),
         });
         setComments((list) => list.map((c) =>
             c.id === comment.id ? { ...c, isHidden: !comment.isHidden } : c));
@@ -103,7 +107,7 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
     });
 
     const handleDelete = (comment) => act(comment.id, async () => {
-        await call(`/api/meta/comments/${comment.id}?pageId=${encodeURIComponent(post.pageId)}`, {
+        await call(`/api/meta/comments/${comment.id}?pageId=${encodeURIComponent(post.pageId)}&platform=${platform}`, {
             method: 'DELETE',
         });
         setComments((list) => list.filter((c) => c.id !== comment.id));
@@ -136,6 +140,13 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
                         <X className="h-4 w-4" />
                     </button>
                 </div>
+
+                {permissionError && (
+                    <div className="mx-5 mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900">
+                        <p className="font-semibold">Facebook reconnection required</p>
+                        <p className="mt-1">{permissionError}</p>
+                    </div>
+                )}
 
                 {/* Thread */}
                 <div className="flex-1 overflow-y-auto p-5 space-y-4">

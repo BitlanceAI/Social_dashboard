@@ -18,6 +18,7 @@ import {
     Sun,
     Moon,
     Bot,
+    Inbox,
 } from 'lucide-react';
 
 /**
@@ -34,6 +35,7 @@ import {
 const NAV = [
     { id: 'create', label: 'Create a Post', short: 'Create', icon: PenSquare, needsConnection: false },
     { id: 'pipelines', label: 'AI Pipelines', short: 'Pipelines', icon: Bot, needsConnection: false },
+    { id: 'inbox', label: 'Engagement Inbox', short: 'Inbox', icon: Inbox, needsConnection: true },
     { id: 'approvals', label: 'Approval Queue', short: 'Review', icon: CheckCircle2, needsConnection: false },
     { id: 'profiles', label: 'Social Profiles', short: 'Profiles', icon: UserCircle, needsConnection: false },
     { id: 'library', label: 'Media Library', short: 'Library', icon: HardDrive, needsConnection: false },
@@ -160,7 +162,7 @@ export const DashboardMobileNav = ({ active, onNavigate, isConnected, approvalCo
     <>
 
         <nav className="lg:hidden fixed inset-x-0 bottom-0 z-40 px-3 pb-[env(safe-area-inset-bottom)]">
-            <div className="mx-auto max-w-md mb-3 flex items-stretch gap-1 rounded-2xl border border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-xl shadow-lg p-1.5">
+            <div className="mx-auto max-w-md mb-3 flex items-stretch gap-1 overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-xl shadow-lg p-1.5">
                 {NAV.map(({ id, label, short, icon: Icon, needsConnection }) => {
                     const disabled = needsConnection && !isConnected;
                     const isActive = active === id && !disabled;
@@ -171,7 +173,7 @@ export const DashboardMobileNav = ({ active, onNavigate, isConnected, approvalCo
                             disabled={disabled}
                             aria-current={isActive ? 'page' : undefined}
                             aria-label={id === 'approvals' ? `${label}, ${approvalCount} pending` : label}
-                            className={`relative flex-1 min-w-0 flex flex-col items-center gap-1 py-2 rounded-xl transition-colors ${
+                            className={`relative min-w-14 flex-1 flex flex-col items-center gap-1 py-2 rounded-xl transition-colors ${
                                 disabled
                                     ? 'text-[var(--muted-2)]'
                                     : isActive

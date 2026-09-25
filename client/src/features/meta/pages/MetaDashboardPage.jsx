@@ -4,6 +4,7 @@ import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Facebook } from 'lucide-react';
 import { platformMeta, providerOf, prefixFor, charLimitFor } from '@/features/meta/lib/providers';
 import AnalyticsPanel from '@/features/meta/components/AnalyticsPanel';
+import EngagementInbox from '@/features/meta/components/EngagementInbox';
 import CreatePostHub from '@/features/meta/components/CreatePostHub';
 import SocialProfilesPanel from '@/features/meta/components/SocialProfilesPanel';
 import AddProfileModal from '@/features/meta/components/AddProfileModal';
@@ -73,7 +74,7 @@ import BulkUploadModal from '@/features/meta/components/BulkUploadModal';
 // effect or auth-state handler re-fires it — kills the duplicate connect toast.
 const processedOAuthTokens = new Set();
 const PipelinesPage = lazy(() => import('@/features/pipelines/pages/PipelinesPage'));
-const dashboardTabs = new Set(['create', 'approvals', 'profiles', 'library', 'history', 'analytics']);
+const dashboardTabs = new Set(['create', 'inbox', 'approvals', 'profiles', 'library', 'history', 'analytics']);
 
 const MetaDashboardView = ({ activeTab, setActiveTab }) => {
     const navigate = useNavigate();
@@ -1365,16 +1366,16 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                                                             {it.source === 'live' && it.likes != null && (
                                                                 <span className="text-[var(--muted)]">{it.likes} likes</span>
                                                             )}
-                                                            {it.source === 'live' && it.platform === 'facebook' && (
+                                                            {it.source === 'live' && ['facebook', 'instagram'].includes(it.platform) && (
                                                                 <button
                                                                     onClick={() => setCommentsPost(it.raw)}
                                                                     className="text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
-                                                                    title="Read, reply to, hide or delete comments as your Page"
+                                                                    title={`Read, reply to, hide or delete ${it.platform} comments`}
                                                                 >
                                                                     {it.comments ?? 0} comments →
                                                                 </button>
                                                             )}
-                                                            {it.source === 'live' && it.platform !== 'facebook' && it.comments != null && (
+                                                            {it.source === 'live' && !['facebook', 'instagram'].includes(it.platform) && it.comments != null && (
                                                                 <span className="text-[var(--muted)]">{it.comments} comments</span>
                                                             )}
                                                             {it.permalink && (
@@ -1460,6 +1461,13 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                                     });
                                     setShowTemplates(true);
                                 }}
+                            />
+                        )}
+
+                        {activeTab === 'inbox' && isConnected && (
+                            <EngagementInbox
+                                authHeaders={getAuthHeaders}
+                                onOpenThread={setCommentsPost}
                             />
                         )}
 

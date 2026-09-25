@@ -104,7 +104,7 @@ const PrivacyPolicy = () => (
                 <strong className="text-[var(--text)]">What we do not do:</strong>
             </p>
             <ul className={`${LIST} mb-6`}>
-                <li>We do not read or store your Facebook or Instagram direct messages.</li>
+                <li>When you enable messaging, we store incoming and outgoing business messages, participant identifiers, attachment links, timestamps, and delivery/read status to provide your workspace inbox. Authorized workspace staff can read and reply to these conversations.</li>
                 <li>We do not sell, rent, or share Meta platform data with third parties.</li>
                 <li>We do not use Meta platform data to build advertising profiles or train models.</li>
             </ul>
@@ -112,7 +112,9 @@ const PrivacyPolicy = () => (
                 Access tokens are encrypted at rest and are used only to make requests you initiate.
                 You can disconnect at any time from the Meta dashboard inside this application, or by
                 removing the app in your Facebook settings &mdash; either action deletes the stored
-                token and connection immediately.
+                token and connection immediately, together with the messaging accounts, conversations,
+                and messages associated with that connection. Message history is retained while the
+                connection remains active, unless the associated Page is deselected or the workspace is deleted.
             </p>
             <p className={BODY}>
                 To request deletion of all data associated with your Meta account, follow the{' '}

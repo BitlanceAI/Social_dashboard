@@ -237,6 +237,18 @@ const handleMetaError = async (res, workspaceId, errorResult) => {
     return res.status(400).json({ error: errorResult.error });
 };
 
+const handleCommentActionError = async (res, workspaceId, errorResult, requiredPermission = 'pages_manage_engagement') => {
+    if ([10, 200].includes(Number(errorResult.code))) {
+        return res.status(403).json({
+            success: false,
+            error: `Comment management permission is missing. Reconnect Meta after ${requiredPermission} is approved and enabled for the app.`,
+            code: 'META_PERMISSION_REQUIRED',
+            requiredPermission,
+        });
+    }
+    return handleMetaError(res, workspaceId, errorResult);
+};
+
 // ==================== UPLOAD ROUTES ====================
 
 /**
@@ -1296,6 +1308,89 @@ router.get('/posts/history', async (req, res) => {
 // ==================== COMMENT MANAGEMENT ====================
 
 /**
+ * GET /api/meta/comments/inbox?limit=30
+ *
+ * A unified, newest-first queue of Facebook and Instagram comments across the
+ * workspace's selected Pages. DMs are intentionally excluded: they require a
+ * separate messaging product, permissions, retention rules, and App Review.
+ */
+router.get('/comments/inbox', async (req, res) => {
+    try {
+        const loaded = await loadConnection(req, res);
+        if (!loaded) return;
+
+        const pagesResult = await loaded.metaService.getPages();
+        if (!pagesResult.success) return handleMetaError(res, req.workspaceId, pagesResult);
+
+        const selectedIds = loaded.connection.selected_page_ids;
+        const pages = (pagesResult.pages || []).filter(
+            (page) => !Array.isArray(selectedIds) || selectedIds.map(String).includes(String(page.id)),
+        );
+        const requestedLimit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 30));
+        const postLimit = Math.min(12, requestedLimit);
+        const feedJobs = pages.flatMap((page) => {
+            if (!page.access_token) return [];
+            const jobs = [{
+                platform: 'facebook',
+                accountId: page.id,
+                accountName: page.name,
+                token: page.access_token,
+                promise: loaded.metaService.getPageFeed(page.id, page.name, page.access_token, postLimit),
+            }];
+            if (page.instagram_business_account?.id) {
+                const instagram = page.instagram_business_account;
+                jobs.push({
+                    platform: 'instagram',
+                    accountId: instagram.id,
+                    accountName: instagram.username ? `@${instagram.username}` : page.name,
+                    token: page.access_token,
+                    promise: loaded.metaService.getInstagramFeed(instagram.id, instagram.username, page.access_token, postLimit),
+                });
+            }
+            return jobs;
+        });
+
+        const feeds = await Promise.all(feedJobs.map(async (job) => ({ ...job, result: await job.promise })));
+        const commentJobs = [];
+        const feedErrors = [];
+        for (const feed of feeds) {
+            if (!feed.result.success) {
+                feedErrors.push(`${feed.accountName}: ${feed.result.error}`);
+                continue;
+            }
+            for (const post of feed.result.posts || []) {
+                commentJobs.push((async () => {
+                    const result = feed.platform === 'instagram'
+                        ? await loaded.metaService.getInstagramComments(post.id, feed.token)
+                        : await loaded.metaService.getPostComments(post.id, feed.token);
+                    if (!result.success) {
+                        feedErrors.push(`${feed.accountName}: ${result.error}`);
+                        return [];
+                    }
+                    return result.comments.map((comment) => ({
+                        id: comment.id,
+                        platform: feed.platform,
+                        accountName: feed.accountName,
+                        post: { ...post, pageId: feed.accountId, pageName: feed.accountName },
+                        comment,
+                    }));
+                })());
+            }
+        }
+
+        const items = (await Promise.all(commentJobs))
+            .flat()
+            .sort((a, b) => new Date(b.comment.createdAt) - new Date(a.comment.createdAt))
+            .slice(0, requestedLimit);
+
+        res.json({ success: true, items, feedErrors: [...new Set(feedErrors)] });
+    } catch (error) {
+        console.error('Comment inbox error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
  * Every comment action needs the PAGE token for the page the post belongs
  * to; the client sends pageId alongside, and getPageToken re-derives the
  * token from the user token rather than trusting anything stored.
@@ -1316,13 +1411,41 @@ const withPageToken = async (req, res, pageId) => {
     return { ...loaded, pageAccessToken: tokenResult.pageAccessToken };
 };
 
+const withInstagramToken = async (req, res, igUserId) => {
+    if (!igUserId) {
+        res.status(400).json({ error: 'Instagram account id is required' });
+        return null;
+    }
+    const loaded = await loadConnection(req, res);
+    if (!loaded) return null;
+
+    const pagesResult = await loaded.metaService.getPages();
+    if (!pagesResult.success) {
+        await handleMetaError(res, req.workspaceId, pagesResult);
+        return null;
+    }
+    const page = (pagesResult.pages || []).find(
+        (item) => String(item.instagram_business_account?.id) === String(igUserId),
+    );
+    if (!page?.access_token) {
+        res.status(404).json({ error: 'The Instagram account is not linked to a selected Facebook Page.' });
+        return null;
+    }
+    return { ...loaded, pageAccessToken: page.access_token };
+};
+
 /** GET /api/meta/posts/:postId/comments?pageId= */
 router.get('/posts/:postId/comments', async (req, res) => {
     try {
-        const ctx = await withPageToken(req, res, req.query.pageId);
+        const platform = req.query.platform === 'instagram' ? 'instagram' : 'facebook';
+        const ctx = platform === 'instagram'
+            ? await withInstagramToken(req, res, req.query.pageId)
+            : await withPageToken(req, res, req.query.pageId);
         if (!ctx) return;
 
-        const result = await ctx.metaService.getPostComments(req.params.postId, ctx.pageAccessToken);
+        const result = platform === 'instagram'
+            ? await ctx.metaService.getInstagramComments(req.params.postId, ctx.pageAccessToken)
+            : await ctx.metaService.getPostComments(req.params.postId, ctx.pageAccessToken);
         if (!result.success) return handleMetaError(res, req.workspaceId, result);
 
         res.json({ success: true, comments: result.comments });
@@ -1338,11 +1461,16 @@ router.post('/comments/:commentId/reply', async (req, res) => {
         const message = (req.body?.message || '').trim();
         if (!message) return res.status(400).json({ error: 'A reply message is required' });
 
-        const ctx = await withPageToken(req, res, req.body?.pageId);
+        const platform = req.body?.platform === 'instagram' ? 'instagram' : 'facebook';
+        const ctx = platform === 'instagram'
+            ? await withInstagramToken(req, res, req.body?.pageId)
+            : await withPageToken(req, res, req.body?.pageId);
         if (!ctx) return;
 
-        const result = await ctx.metaService.replyToComment(req.params.commentId, message, ctx.pageAccessToken);
-        if (!result.success) return handleMetaError(res, req.workspaceId, result);
+        const result = platform === 'instagram'
+            ? await ctx.metaService.replyToInstagramComment(req.params.commentId, message, ctx.pageAccessToken)
+            : await ctx.metaService.replyToComment(req.params.commentId, message, ctx.pageAccessToken);
+        if (!result.success) return handleCommentActionError(res, req.workspaceId, result, platform === 'instagram' ? 'instagram_manage_comments' : 'pages_manage_engagement');
 
         res.status(201).json({ success: true, replyId: result.data?.id });
     } catch (error) {
@@ -1354,12 +1482,17 @@ router.post('/comments/:commentId/reply', async (req, res) => {
 /** POST /api/meta/comments/:commentId/hide  { pageId, hidden } */
 router.post('/comments/:commentId/hide', async (req, res) => {
     try {
-        const ctx = await withPageToken(req, res, req.body?.pageId);
+        const platform = req.body?.platform === 'instagram' ? 'instagram' : 'facebook';
+        const ctx = platform === 'instagram'
+            ? await withInstagramToken(req, res, req.body?.pageId)
+            : await withPageToken(req, res, req.body?.pageId);
         if (!ctx) return;
 
         const hidden = req.body?.hidden !== false;
-        const result = await ctx.metaService.setCommentHidden(req.params.commentId, hidden, ctx.pageAccessToken);
-        if (!result.success) return handleMetaError(res, req.workspaceId, result);
+        const result = platform === 'instagram'
+            ? await ctx.metaService.setInstagramCommentHidden(req.params.commentId, hidden, ctx.pageAccessToken)
+            : await ctx.metaService.setCommentHidden(req.params.commentId, hidden, ctx.pageAccessToken);
+        if (!result.success) return handleCommentActionError(res, req.workspaceId, result, platform === 'instagram' ? 'instagram_manage_comments' : 'pages_manage_engagement');
 
         res.json({ success: true, hidden });
     } catch (error) {
@@ -1371,11 +1504,16 @@ router.post('/comments/:commentId/hide', async (req, res) => {
 /** DELETE /api/meta/comments/:commentId?pageId= */
 router.delete('/comments/:commentId', async (req, res) => {
     try {
-        const ctx = await withPageToken(req, res, req.query.pageId);
+        const platform = req.query.platform === 'instagram' ? 'instagram' : 'facebook';
+        const ctx = platform === 'instagram'
+            ? await withInstagramToken(req, res, req.query.pageId)
+            : await withPageToken(req, res, req.query.pageId);
         if (!ctx) return;
 
-        const result = await ctx.metaService.deleteComment(req.params.commentId, ctx.pageAccessToken);
-        if (!result.success) return handleMetaError(res, req.workspaceId, result);
+        const result = platform === 'instagram'
+            ? await ctx.metaService.deleteInstagramComment(req.params.commentId, ctx.pageAccessToken)
+            : await ctx.metaService.deleteComment(req.params.commentId, ctx.pageAccessToken);
+        if (!result.success) return handleCommentActionError(res, req.workspaceId, result, platform === 'instagram' ? 'instagram_manage_comments' : 'pages_manage_engagement');
 
         res.json({ success: true });
     } catch (error) {
