@@ -93,6 +93,8 @@ const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn =
     const [linkedinRows, setLinkedinRows] = useState([]); // app-tracked LinkedIn
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [instagramInsights, setInstagramInsights] = useState(null);
+    const [insightsError, setInsightsError] = useState(null);
     const [reloadKey, setReloadKey] = useState(0);
 
     // ── Delivery (the app's own queue) ──
@@ -101,6 +103,20 @@ const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn =
     const pending = posts.filter(p => p.status === 'pending' || p.status === 'processing');
     const attempted = published.length + failed.length;
     const successRate = attempted === 0 ? null : Math.round((published.length / attempted) * 100);
+
+    useEffect(() => {
+        if (!hasInstagram) return;
+        let cancelled = false;
+        fetch(`${API_BASE_URL}/api/instagram/insights`, { headers: authHeaders() })
+            .then(async (response) => {
+                const result = await response.json();
+                if (!response.ok || !result.success) throw new Error(result.error || 'Instagram insights unavailable.');
+                return result.data?.data?.find((metric) => metric.name === 'views')?.total_value?.value ?? null;
+            })
+            .then((views) => { if (!cancelled) { setInstagramInsights(views); setInsightsError(null); } })
+            .catch((cause) => { if (!cancelled) setInsightsError(cause.message); });
+        return () => { cancelled = true; };
+    }, [hasInstagram, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Engagement: live platform data, same source as Post History ──
     useEffect(() => {
@@ -206,6 +222,14 @@ const AnalyticsPanel = ({ posts = [], authHeaders, hasMeta = true, hasLinkedIn =
 
     return (
         <div className="space-y-10">
+            {hasInstagram && (
+                <div>
+                    <h3 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)] mb-1">Instagram account insights</h3>
+                    <p className="text-sm text-[var(--muted)] mb-4">Views for your directly connected Instagram professional account.</p>
+                    {insightsError ? <p className="text-sm text-red-600">{insightsError}</p>
+                        : <div className="grid grid-cols-2 lg:grid-cols-4 gap-4"><Stat icon={Heart} label="Views" value={num(instagramInsights)} /></div>}
+                </div>
+            )}
             {/* ── Delivery ── */}
             <div>
                 <h3 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-[var(--text)] mb-1">Delivery</h3>

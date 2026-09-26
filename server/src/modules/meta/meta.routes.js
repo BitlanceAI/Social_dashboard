@@ -241,7 +241,7 @@ const handleCommentActionError = async (res, workspaceId, errorResult, requiredP
     if ([10, 200].includes(Number(errorResult.code))) {
         return res.status(403).json({
             success: false,
-            error: `Comment management permission is missing. Reconnect Meta after ${requiredPermission} is approved and enabled for the app.`,
+            error: `${requiredPermission} permission is missing. Reconnect Meta after this permission is approved and enabled for the app.`,
             code: 'META_PERMISSION_REQUIRED',
             requiredPermission,
         });
@@ -1433,6 +1433,31 @@ const withInstagramToken = async (req, res, igUserId) => {
     }
     return { ...loaded, pageAccessToken: page.access_token };
 };
+
+/** POST/DELETE /api/meta/instagram/likes { pageId, mediaId | commentId } */
+const changeInstagramLike = async (req, res, liked) => {
+    try {
+        const input = liked ? req.body : req.query;
+        const { pageId, mediaId, commentId } = input || {};
+        if (!pageId || Boolean(mediaId) === Boolean(commentId) ||
+            !/^\d+$/.test(String(pageId)) || !/^\d+$/.test(String(mediaId || commentId))) {
+            return res.status(400).json({ error: 'Provide an Instagram account ID and exactly one media or comment ID.' });
+        }
+        const ctx = await withInstagramToken(req, res, pageId);
+        if (!ctx) return;
+        const result = await ctx.metaService.setInstagramLike(
+            pageId, commentId ? 'comment' : 'media', commentId || mediaId, liked, ctx.pageAccessToken,
+        );
+        if (!result.success) return handleCommentActionError(res, req.workspaceId, result, 'instagram_manage_engagement');
+        return res.json({ success: true, liked });
+    } catch (error) {
+        console.error('Instagram like error:', error);
+        return res.status(500).json({ error: error.message });
+    }
+};
+
+router.post('/instagram/likes', (req, res) => changeInstagramLike(req, res, true));
+router.delete('/instagram/likes', (req, res) => changeInstagramLike(req, res, false));
 
 /** GET /api/meta/posts/:postId/comments?pageId= */
 router.get('/posts/:postId/comments', async (req, res) => {

@@ -366,6 +366,15 @@ class MetaService {
         return pageApi.request('DELETE', `/${commentId}`);
     }
 
+    async setInstagramLike(igUserId, target, targetId, liked, pageAccessToken) {
+        const pageApi = new MetaService(pageAccessToken);
+        const field = target === 'comment' ? 'comment_id' : 'media_id';
+        const params = { [field]: targetId };
+        return liked
+            ? pageApi.request('POST', `/${igUserId}/likes`, params)
+            : pageApi.request('DELETE', `/${igUserId}/likes`, {}, params);
+    }
+
     // ==================== FACEBOOK PAGE POST METHODS ====================
 
     /**
@@ -770,6 +779,7 @@ class MetaService {
             'instagram_basic',          // read IG profile + media
             'instagram_content_publish', // publish to IG Business account
             'instagram_manage_comments', // read, reply to, hide, delete IG comments
+            'instagram_manage_engagement', // like/unlike IG media and comments as the connected account
             'business_management',      // read & manage Business Manager assets
             ...(process.env.META_MESSAGING_ENABLED === 'true'
                 ? ['pages_messaging', 'instagram_manage_messages', 'pages_manage_metadata'] : []),
@@ -784,8 +794,7 @@ class MetaService {
         // DEFAULT_SCOPES. Meta grants an unapproved permission to anyone with a
         // role on the app, so an app admin can verify whether a scope fixes a
         // problem before committing to App Review. Requesting one for a normal
-        // user fails the whole dialog with "Invalid Scopes", so anything proven
-        // useful here belongs in DEFAULT_SCOPES *after* it is approved.
+        // user fails the whole dialog with "Invalid Scopes" until approval.
         // Ignored when a login configuration is used: a config carries its own
         // permission list and `scope` is not sent alongside it.
         const extra = (process.env.META_EXTRA_SCOPES || '')

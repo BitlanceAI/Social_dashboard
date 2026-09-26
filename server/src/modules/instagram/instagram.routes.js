@@ -193,6 +193,22 @@ router.get('/posts/history', wrap(async (req, res) => {
     const ctx = await load(req, res); if (!ctx) return;
     return apiResult(req, res, await ctx.service.getFeed(ctx.connection.instagram_user_id, ctx.connection.username));
 }));
+router.get('/insights', wrap(async (req, res) => {
+    const ctx = await load(req, res); if (!ctx) return;
+    return apiResult(req, res, await ctx.service.getAccountInsights(ctx.connection.instagram_user_id));
+}));
+router.get('/posts/:mediaId/comments', wrap(async (req, res) => {
+    if (!/^\d+$/.test(req.params.mediaId)) return res.status(400).json({ error: 'Invalid Instagram media ID.' });
+    const ctx = await load(req, res); if (!ctx) return;
+    return apiResult(req, res, await ctx.service.getComments(req.params.mediaId));
+}));
+router.post('/comments/:commentId/reply', wrap(async (req, res) => {
+    if (!/^\d+$/.test(req.params.commentId)) return res.status(400).json({ error: 'Invalid Instagram comment ID.' });
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    if (!message || message.length > 1000) return res.status(400).json({ error: 'Reply must be 1–1,000 characters.' });
+    const ctx = await load(req, res); if (!ctx) return;
+    return apiResult(req, res, await ctx.service.replyToComment(req.params.commentId, message));
+}));
 router.post('/posts/upload-media', postMediaUpload.array('files'), wrap(async (req, res) => {
     const result = await uploadPostMedia(req.user.id, req.files || [], req.workspaceId);
     res.status(result.success ? 200 : 400).json(result);

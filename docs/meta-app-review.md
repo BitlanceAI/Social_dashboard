@@ -1,8 +1,40 @@
 # Meta App Review — Submission Pack
 
-Covers the two permissions this app can genuinely demonstrate today:
-**`instagram_basic`** and **`instagram_content_publish`**, plus the Page
-permissions Meta requires alongside them.
+## `instagram_manage_engagement` (Instagram likes)
+
+**Use case description** (paste into the form):
+
+> Our dashboard lets an authorized user of a connected Instagram professional
+> account like or unlike Instagram media and comments as that account. After the
+> user connects the Instagram account through its linked Facebook Page, they open
+> Post History or a post's Comments panel and click Like or Unlike. The app sends
+> that specific user action to the Instagram Graph API using the connected
+> account's Page access token (`POST` or `DELETE /{ig-user-id}/likes` with a
+> `media_id` or `comment_id`). We do not create likes automatically or in bulk.
+
+**Screencast steps:**
+
+1. Sign in to the dashboard with a reviewer account that has access to a linked
+   Instagram professional account and Facebook Page.
+2. Connect the Meta account and grant `instagram_basic`, `pages_show_list`, and
+   `instagram_manage_engagement` when prompted. Reconnect if the account was
+   connected before this permission was added to OAuth.
+3. Open **Post History**, find an Instagram post, and click **Like**. Show the
+   success toast and the resulting like in Instagram.
+4. Click **Unlike** and show that the like was removed. Optionally open that
+   post's **Comments** panel and demonstrate Like/Unlike on a comment.
+
+Before submitting, make at least one successful Like or Unlike request through
+the connected app. Meta's App Review checklist will not count the permission
+until it sees a successful API call. Use an account with an app role while the
+app is in Development mode, and verify the call succeeds before recording.
+
+---
+
+The sections below also cover the original publishing review. Check the
+requested permission list against the current OAuth configuration before
+submitting, especially when Facebook Login for Business uses a login
+configuration that supplies its own permission list.
 
 > Every step below matches a real screen in this codebase. Do not add steps for
 > features that do not exist — that is what gets submissions rejected.
@@ -18,9 +50,7 @@ permissions Meta requires alongside them.
 | `pages_manage_posts` | Publish the composed post to the selected Facebook Page |
 | `instagram_basic` | Read the Instagram Business account profile and existing media |
 | `instagram_content_publish` | Publish images/videos to the Instagram Business account |
-
-Not requested: messaging, comments, insights, ads, and WhatsApp scopes. Those
-features do not exist in this app yet.
+| `instagram_manage_engagement` | Like or unlike Instagram media and comments as the connected account |
 
 ---
 

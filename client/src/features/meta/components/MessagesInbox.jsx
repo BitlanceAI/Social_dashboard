@@ -83,8 +83,8 @@ export default function MessagesInbox({ authHeaders }) {
         setBusy(true); setError(''); setNotice('');
         try {
             const data = await api('/subscribe', {});
-            setNotice(data.outcomes.length ? data.outcomes.map(o => `${o.name} (${o.provider}): ${o.success ? 'connected' : o.error}`).join(' · ')
-                : 'Select a Facebook Page in Social Profiles first.');
+            setNotice(data.outcomes.length ? data.outcomes.map(o => `${o.name} (${o.source || o.provider}): ${o.success ? 'connected' : o.error}`).join(' · ')
+                : 'Connect a Facebook Page or an Instagram Login account in Social Profiles first.');
             await loadThreads();
         } catch (e) { setError(e.message); }
         finally { setBusy(false); }
@@ -140,7 +140,7 @@ export default function MessagesInbox({ authHeaders }) {
                 {loading ? <p className="p-5 text-sm text-[var(--muted)]">Loading conversations…</p> : threads.length === 0 && <p className="p-5 text-sm text-[var(--muted)]">No conversations yet. Connect messaging, then have someone send your account a message. Only messages received after connecting appear here.</p>}
                 {threads.map(t => <button key={t.id} onClick={() => openThread(t)} aria-pressed={selected?.id === t.id} className={`mb-1 w-full rounded-xl p-3 text-left ${selected?.id === t.id ? 'bg-[var(--accent-muted)]' : 'hover:bg-[var(--bg)]'}`}>
                     <span className="block truncate text-sm font-semibold text-[var(--text)]">{t.unread && '● '}Customer · {t.participant_id.slice(-6)}</span>
-                    <span className="block text-xs text-[var(--accent)]">{t.social_message_accounts.name} · {t.social_message_accounts.provider}</span>
+                    <span className="block text-xs text-[var(--accent)]">{t.social_message_accounts.name} · {t.social_message_accounts.provider}{t.social_message_accounts.connection_type === 'instagram_login' ? ' (Instagram Login)' : ''}</span>
                     <span className="mt-2 block truncate text-xs text-[var(--muted)]">{t.preview || 'Attachment'}</span>
                     <span className="mt-1 block text-[10px] text-[var(--muted)]">{timestamp(t.last_message_at)}</span>
                 </button>)}

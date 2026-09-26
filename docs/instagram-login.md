@@ -28,8 +28,19 @@ public backend: the default is `${PUBLIC_URL}/api/instagram/oauth/callback`.
 Register that **exact** redirect URL in Instagram Business Login settings.
 Restart the backend after changing environment settings.
 
-The app requests `instagram_business_basic` and
-`instagram_business_content_publish`. Configure the necessary access for these
+If Instagram shows `Invalid redirect_uri`, copy the `redirect_uri` value from
+the authorization URL opened by **Add Profile → Instagram** and add that exact
+HTTPS URL under **Instagram → API setup with Instagram login → Business Login →
+Valid OAuth Redirect URIs** in the Meta developer dashboard. The callback ends
+in `/api/instagram/oauth/callback`; the frontend URL and the Facebook Login
+callback are different. A temporary ngrok hostname changes when the tunnel
+changes, so update `PUBLIC_URL`, the Meta allowlist, and restart the server
+whenever you start a new tunnel. Keep only one `PUBLIC_URL` line in `.env`.
+
+The app requests `instagram_business_basic`,
+`instagram_business_content_publish`, `instagram_business_manage_messages`, and
+`instagram_business_manage_insights`, and `instagram_business_manage_comments`.
+Configure the necessary access for these
 permissions in Meta. While testing, use a professional Instagram account added
 as an accepted app tester; serving other accounts requires the applicable app
 review/access approval. Personal Instagram accounts cannot use this integration.
@@ -54,6 +65,13 @@ Configure platform callbacks where requested:
 4. The dashboard shows `@username` with **Instagram · connected directly**.
 5. Select that account in the composer; publish now or schedule an image, Reel,
    or carousel. Bulk CSV scheduling and content pipelines also accept it.
+   Open **Analytics** to view account insights. This makes a live Insights API
+   call and requires reconnecting if the account was linked before the insights
+   permission was added.
+   In **All Posts**, open an Instagram post's **comments** link to read its
+   comments, then reply to a comment. Reconnect first if the account was linked
+   before the comment permission was added. Opening the comments makes the
+   API call needed for the comment permission's App Review testing checklist.
 6. Disconnect from its profile card. This removes the stored connection and its
    queued/history rows; it does not delete media already published on Instagram.
 

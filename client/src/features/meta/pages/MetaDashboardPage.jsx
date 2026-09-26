@@ -50,6 +50,7 @@ import {
     UploadCloud,
     Trash2,
     MessageCircle,
+    Heart,
     Check
 } from 'lucide-react';
 
@@ -454,6 +455,30 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
     const [historyNowMs] = useState(() => Date.now()); // stable "now" for range filtering
     // Facebook post whose comment thread is open in the manager modal
     const [commentsPost, setCommentsPost] = useState(null);
+    const [likedHistoryPosts, setLikedHistoryPosts] = useState({});
+    const [likeBusyId, setLikeBusyId] = useState(null);
+
+    const handleHistoryLike = async (post) => {
+        if (likeBusyId) return;
+        const next = !likedHistoryPosts[post.id];
+        setLikeBusyId(post.id);
+        try {
+            const params = new URLSearchParams({ pageId: post.pageId, mediaId: post.id });
+            const response = await fetch(`${API_BASE_URL}/api/meta/instagram/likes${next ? '' : `?${params}`}`, {
+                method: next ? 'POST' : 'DELETE',
+                headers: { ...getAuthHeaders(), ...(next ? { 'Content-Type': 'application/json' } : {}) },
+                ...(next ? { body: JSON.stringify({ pageId: post.pageId, mediaId: post.id }) } : {}),
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.error || 'Could not update the Instagram like');
+            setLikedHistoryPosts((current) => ({ ...current, [post.id]: next }));
+            toast.success(next ? 'Post liked on Instagram' : 'Instagram like removed');
+        } catch (error) {
+            toast.error(error.message);
+        } finally {
+            setLikeBusyId(null);
+        }
+    };
 
     const loadPlatformHistory = async () => {
         setHistoryLoading(true);
@@ -467,7 +492,14 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                     return data.success ? data : { posts: [], feedErrors: [{ platform: provider, error: data.error || 'Could not load posts.' }] };
                 } catch { return { posts: [], feedErrors: [{ platform: provider, error: 'Could not load posts.' }] }; }
             }));
-            setPlatformHistory([...new Map(feeds.flatMap((f) => f.posts || []).map((p) => [p.id, p])).values()]);
+            // Meta posts carry the numeric Instagram account ID required by
+            // engagement actions. Keep them when direct Instagram Login also
+            // returns the same media ID.
+            const postsById = new Map();
+            for (const post of feeds.flatMap((feed) => feed.posts || [])) {
+                if (!postsById.has(post.id)) postsById.set(post.id, post);
+            }
+            setPlatformHistory([...postsById.values()]);
             setHistoryFeedErrors(feeds.flatMap((f) => f.feedErrors || []));
         } catch (error) {
             console.error('Failed to load platform history:', error);
@@ -1358,13 +1390,24 @@ const MetaDashboardView = ({ activeTab, setActiveTab }) => {
                                                         </p>
                                                     )}
 
-                                                    <div className="flex items-center justify-between gap-2 mt-auto">
+                                                    <div className="flex flex-wrap items-center justify-between gap-2 mt-auto">
                                                         <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium ${statusConfig.bg} ${statusConfig.color}`}>
                                                             {statusConfig.label}
                                                         </span>
-                                                        <div className="flex items-center gap-2 text-[11px]">
+                                                        <div className="flex flex-wrap items-center gap-2 text-[11px]">
                                                             {it.source === 'live' && it.likes != null && (
                                                                 <span className="text-[var(--muted)]">{it.likes} likes</span>
+                                                            )}
+                                                            {it.source === 'live' && it.platform === 'instagram' && /^\d+$/.test(String(it.raw.pageId)) && (
+                                                                <button
+                                                                    onClick={() => handleHistoryLike(it.raw)}
+                                                                    disabled={likeBusyId === it.raw.id}
+                                                                    aria-label={`${likedHistoryPosts[it.raw.id] ? 'Unlike' : 'Like'} Instagram post by ${it.pageName}`}
+                                                                    className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 font-semibold text-[var(--accent)] hover:bg-[var(--accent-muted)] disabled:opacity-50"
+                                                                >
+                                                                    <Heart className={`h-3.5 w-3.5 ${likedHistoryPosts[it.raw.id] ? 'fill-current' : ''}`} />
+                                                                    {likedHistoryPosts[it.raw.id] ? 'Unlike' : 'Like'}
+                                                                </button>
                                                             )}
                                                             {it.source === 'live' && ['facebook', 'instagram'].includes(it.platform) && (
                                                                 <button

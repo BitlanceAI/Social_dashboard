@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, MessageCircle, Send, Eye, EyeOff, Trash2, RefreshCw } from 'lucide-react';
+import { X, MessageCircle, Send, Eye, EyeOff, Trash2, RefreshCw, Heart } from 'lucide-react';
 import toast from 'react-hot-toast';
 import API_BASE_URL from '@/shared/config';
 
@@ -24,13 +24,17 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
     const [replyText, setReplyText] = useState('');
     const [busy, setBusy] = useState({});           // comment id -> action in flight
     const [permissionError, setPermissionError] = useState(null);
+    const [liked, setLiked] = useState({});
     const platform = post.platform === 'instagram' ? 'instagram' : 'facebook';
+    const directInstagram = post.provider === 'instagram';
 
     const load = useCallback(async () => {
         setLoading(true);
         try {
             const res = await fetch(
-                `${API_BASE_URL}/api/meta/posts/${post.id}/comments?pageId=${encodeURIComponent(post.pageId)}&platform=${platform}`,
+                directInstagram
+                    ? `${API_BASE_URL}/api/instagram/posts/${post.id}/comments`
+                    : `${API_BASE_URL}/api/meta/posts/${post.id}/comments?pageId=${encodeURIComponent(post.pageId)}&platform=${platform}`,
                 { headers: authHeaders() },
             );
             const data = await res.json();
@@ -43,7 +47,7 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
             setLoading(false);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [post.id, post.pageId, platform]);
+    }, [post.id, post.pageId, platform, directInstagram]);
 
     useEffect(() => {
         const t = setTimeout(load, 0);
@@ -84,7 +88,7 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
     const handleReply = (commentId) => act(commentId, async () => {
         const message = replyText.trim();
         if (!message) return;
-        await call(`/api/meta/comments/${commentId}/reply`, {
+        await call(directInstagram ? `/api/instagram/comments/${commentId}/reply` : `/api/meta/comments/${commentId}/reply`, {
             method: 'POST',
             headers: { ...authHeaders(), 'Content-Type': 'application/json' },
             body: JSON.stringify({ pageId: post.pageId, platform, message }),
@@ -114,6 +118,21 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
         toast.success('Comment deleted');
     });
 
+    const handleLike = (target, id) => act(`like-${target}-${id}`, async () => {
+        const key = `${target}-${id}`;
+        const next = !liked[key];
+        const params = new URLSearchParams({ pageId: post.pageId, [`${target}Id`]: id });
+        await call(`/api/meta/instagram/likes${next ? '' : `?${params}`}`, {
+            method: next ? 'POST' : 'DELETE',
+            ...(next ? {
+                headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pageId: post.pageId, [`${target}Id`]: id }),
+            } : {}),
+        });
+        setLiked((current) => ({ ...current, [key]: next }));
+        toast.success(next ? 'Liked on Instagram' : 'Like removed on Instagram');
+    });
+
     return createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
             <div
@@ -129,6 +148,15 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
                         </h3>
                         <p className="text-[12px] text-[var(--muted)] truncate">{post.message || post.pageName}</p>
                     </div>
+                    {platform === 'instagram' && !directInstagram && <button
+                        onClick={() => handleLike('media', post.id)}
+                        disabled={busy[`like-media-${post.id}`]}
+                        aria-label={`${liked[`media-${post.id}`] ? 'Unlike' : 'Like'} Instagram post`}
+                        className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold text-[var(--accent)] hover:bg-[var(--bg)] disabled:opacity-50"
+                    >
+                        <Heart className={`h-4 w-4 ${liked[`media-${post.id}`] ? 'fill-current' : ''}`} />
+                        {liked[`media-${post.id}`] ? 'Unlike post' : 'Like post'}
+                    </button>}
                     <button
                         onClick={load}
                         className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--bg)] transition-colors"
@@ -177,6 +205,15 @@ const CommentsModal = ({ post, authHeaders, onClose }) => {
                                         <div className="flex items-center gap-3 mt-2 text-[11px] text-[var(--muted)]">
                                             {c.likeCount > 0 && <span>{c.likeCount} likes</span>}
                                             {c.replyCount > 0 && <span>{c.replyCount} replies</span>}
+                                            {platform === 'instagram' && !directInstagram && <button
+                                                onClick={() => handleLike('comment', c.id)}
+                                                disabled={busy[`like-comment-${c.id}`]}
+                                                aria-label={`${liked[`comment-${c.id}`] ? 'Unlike' : 'Like'} comment by ${c.authorName}`}
+                                                className="inline-flex items-center gap-1 text-[var(--accent)] hover:text-[var(--accent-hover)] disabled:opacity-50"
+                                            >
+                                                <Heart className={`h-3 w-3 ${liked[`comment-${c.id}`] ? 'fill-current' : ''}`} />
+                                                {liked[`comment-${c.id}`] ? 'Unlike' : 'Like'}
+                                            </button>}
                                             <button
                                                 onClick={() => { setReplyTo(replyTo === c.id ? null : c.id); setReplyText(''); }}
                                                 className="text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"

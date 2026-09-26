@@ -2,7 +2,13 @@ import '../../config/env.js';
 import axios from 'axios';
 import { isVideoUrl } from '../meta/meta.service.js';
 
-export const INSTAGRAM_SCOPES = ['instagram_business_basic', 'instagram_business_content_publish'];
+export const INSTAGRAM_SCOPES = [
+    'instagram_business_basic',
+    'instagram_business_content_publish',
+    'instagram_business_manage_messages',
+    'instagram_business_manage_insights',
+    'instagram_business_manage_comments',
+];
 export const instagramTargetId = (id) => `instagram:${id}`;
 
 /** Direct Instagram Login tokens only; Facebook Page tokens never enter this client. */
@@ -61,6 +67,12 @@ export default class InstagramService {
         return this.request('GET', '/me', {}, { fields: 'user_id,username,account_type,profile_picture_url' });
     }
 
+    getAccountInsights(id) {
+        return this.request('GET', `/${id}/insights`, {}, {
+            metric: 'views', period: 'day', metric_type: 'total_value',
+        });
+    }
+
     async getFeed(id, username, limit = 50) {
         const result = await this.request('GET', `/${id}/media`, {}, {
             fields: 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count', limit,
@@ -72,6 +84,24 @@ export default class InstagramService {
             permalink: m.permalink, publishedAt: m.timestamp, likes: m.like_count ?? null,
             comments: m.comments_count ?? null, shares: null,
         })) };
+    }
+
+    async getComments(mediaId) {
+        const result = await this.request('GET', `/${mediaId}/comments`, {}, {
+            fields: 'id,text,timestamp,username,like_count,hidden', limit: 50,
+        });
+        if (!result.success) return result;
+        return { success: true, comments: (result.data.data || []).map((comment) => ({
+            id: comment.id, message: comment.text || '', createdAt: comment.timestamp,
+            authorName: comment.username ? `@${comment.username}` : 'Instagram user',
+            authorPicture: null, likeCount: comment.like_count ?? 0,
+            replyCount: 0, isHidden: Boolean(comment.hidden),
+            canHide: false, canRemove: false,
+        })) };
+    }
+
+    replyToComment(commentId, message) {
+        return this.request('POST', `/${commentId}/replies`, { message });
     }
 
     async waitForContainer(id) {
